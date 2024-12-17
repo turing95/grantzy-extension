@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Grantzy fill form",
+  "version": "1.0",
+  "description": "Fill forms with Grantzy data",
+  "permissions": [
+    "storage"
+  ],
+  "content_scripts": [
+    {
+      "css": ["styles/content.css"],
+      "js": ["scripts/content.js"],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

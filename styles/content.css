@@ -1,0 +1,17 @@
+.result-item:hover {
+    background-color: white;
+}
+.result-item {
+    cursor: pointer;
+}
+.grantzy-widget {
+    position: absolute;
+    background-color: lightgrey;
+    border: 1px solid black;
+    padding: 10px;
+    z-index: 1000;
+    overflow: auto; /* Add overflow to handle content overflow */
+}
+.grantzy-widget > * {
+    margin-bottom: 10px; /* Add spacing between elements */
+}
