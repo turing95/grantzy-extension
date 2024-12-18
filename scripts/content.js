@@ -10,15 +10,24 @@ const observer = new MutationObserver(mutations => {
     });
 });
 
-observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+observer.observe(document.body, {childList: true, subtree: true, attributes: true, characterData: true});
 
 let companies = [];
-fetch('http://localhost:8000/api/companies/')
-    .then(response => response.json())
-    .then(data => {
-        companies = data;
-    })
-    .catch(error => console.error('Error fetching companies:', error));
+
+// Send a message to the background script
+chrome.runtime.sendMessage(
+    {action: "fetchCompanies"},
+    (response) => {
+        if (chrome.runtime.lastError) {
+            console.error("Message Error:", chrome.runtime.lastError);
+        } else if (response.success) {
+            companies = response.companies;
+            console.log("Fetched Companies:", companies);
+        } else {
+            console.error("Error fetching companies:", response.error);
+        }
+    }
+);
 
 
 function handleKeyUp(event) {
@@ -33,13 +42,27 @@ function isInputOrTextarea(element) {
     return tagName === 'input' || tagName === 'textarea';
 }
 
+function createFooter(widget) {
+     const footer = document.createElement('div');
+    footer.classList.add('grantzy-widget-footer');
+
+    const logo = document.createElement('img');
+    logo.src = chrome.runtime.getURL("img/logo.svg");
+    logo.alt = 'Logo';
+    logo.classList.add('grantzy-widget-logo');
+
+    footer.appendChild(logo);
+    widget.appendChild(footer);
+
+}
+
 function displayCompanySearchWidget(element) {
-    if(isInputOrTextarea(element)) {
+    if (isInputOrTextarea(element)) {
         element.autocomplete = 'off';
     }
     const widget = createWidget(element);
     const header = createHeader(widget);
-    const backButton = createBackButton(widget,header);
+    const backButton = createBackButton(widget, header);
 
     const searchInput = createSearchInput(widget);
     const resultsContainer = createResultsContainer(widget);
@@ -56,23 +79,29 @@ function displayCompanySearchWidget(element) {
             setupCompanySearch(searchInput, resultsContainer, element);
         }
     });
+    //createFooter(widget);
+
 
     document.body.appendChild(widget);
+    searchInput.focus();
     document.addEventListener('click', (event) => handleClickOutside(event, widget));
 }
 
-function createBackButton(widget,header) {
+function createBackButton(widget, header) {
     const backButton = document.createElement('button');
     backButton.textContent = 'Select another company';
     backButton.style.display = 'none';
     backButton.addEventListener('click', function () {
+        const searchInput = widget.querySelector('input[type="text"]');
         chrome.storage.local.remove('selectedCompany', function () {
-            const searchInput = widget.querySelector('input[type="text"]');
-            const resultsContainer = widget.querySelector('div');
+            const resultsContainer = widget.querySelector('.results-container');
+            resultsContainer.innerHTML = '';
             backButton.style.display = 'none';
             header.textContent = 'Select a company';
             setupCompanySearch(searchInput, resultsContainer, searchInput);
         });
+        searchInput.value = '';
+        searchInput.focus();
     });
     widget.appendChild(backButton);
     return backButton;
@@ -98,20 +127,30 @@ function createSearchInput(widget) {
 
 function createResultsContainer(widget) {
     const resultsContainer = document.createElement('div');
+    resultsContainer.classList.add('results-container');
     widget.appendChild(resultsContainer);
     return resultsContainer;
 }
 
 function setupDataSearch(searchInput, resultsContainer, companyId, input) {
     searchInput.placeholder = 'Search data...';
-    fetch(`http://localhost:8000/api/companies/${companyId}`)
-        .then(response => response.json())
-        .then(data => {
-            //const fields = Object.keys(data.fields).map(key => ({ key, value: data.fields[key] }));
-            const fields = flattenFields(data.fields);
-            updateResultsContainer(resultsContainer, fields, input);
-        })
-        .catch(error => console.error('Error fetching company data:', error));
+    // Send message to background script to fetch company data
+    chrome.runtime.sendMessage(
+        {action: "fetchCompanyData", companyId: companyId},
+        (response) => {
+            if (chrome.runtime.lastError) {
+                console.error("Message Error:", chrome.runtime.lastError);
+            } else if (response.success) {
+                const fields = flattenFields(response.data.fields);
+                updateResultsContainer(resultsContainer, fields, input);
+                firstResultAutoSelection(resultsContainer, input);
+            } else {
+                console.error("Error fetching company data:", response.error);
+            }
+        }
+    );
+    firstResultAutoSelection(resultsContainer, searchInput);
+
 }
 
 function flattenFields(fields, parentKey = '', result = []) {
@@ -120,10 +159,50 @@ function flattenFields(fields, parentKey = '', result = []) {
         if (typeof fields[key] === 'object' && fields[key] !== null) {
             flattenFields(fields[key], newKey, result);
         } else {
-            result.push({ key: newKey, value: fields[key] });
+            result.push({key: newKey, value: fields[key]});
         }
     }
     return result;
+}
+
+function setHoveredResult(item) {
+    const currentHovered = item.parentElement.querySelector('.result-item.hovered');
+    if (currentHovered) {
+        currentHovered.classList.remove('hovered');
+    }
+    item.classList.add('hovered');
+}
+
+function firstResultAutoSelection(resultsContainer, input) {
+    const firstResultItem = resultsContainer.querySelector('.result-item');
+    if (firstResultItem) {
+        setHoveredResult(firstResultItem);
+    }
+
+    input.addEventListener('keydown', function (event) {
+        console.log(event.key);
+        if (event.key === 'Enter') {
+            const hoveredItem = resultsContainer.querySelector('.result-item.hovered');
+            if (hoveredItem) {
+                hoveredItem.click();
+            }
+        }
+
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            const allItems = Array.from(resultsContainer.querySelectorAll('.result-item'));
+            let currentIndex = allItems.findIndex(item => item.classList.contains('hovered'));
+            if (currentIndex === -1) currentIndex = 0;
+
+            if (event.key === 'ArrowDown') {
+                const nextIndex = (currentIndex + 1) % allItems.length;
+                setHoveredResult(allItems[nextIndex]);
+            } else if (event.key === 'ArrowUp') {
+                const prevIndex = (currentIndex - 1 + allItems.length) % allItems.length;
+                setHoveredResult(allItems[prevIndex]);
+            }
+            event.preventDefault(); // Prevent cursor from moving inside the input
+        }
+    });
 }
 
 function setupCompanySearch(searchInput, resultsContainer, input) {
@@ -133,12 +212,14 @@ function setupCompanySearch(searchInput, resultsContainer, input) {
         const results = companies.filter(company => company.name.toLowerCase().includes(query));
         updateCompanyResults(resultsContainer, results, searchInput, input);
     });
+    firstResultAutoSelection(resultsContainer, searchInput);
 }
 
 function updateCompanyResults(container, results, searchInput, input) {
     container.innerHTML = '';
-    results.forEach(result => {
+    results.forEach((result, index) => {
         const resultItem = createResultItem(result.name);
+
         resultItem.addEventListener('click', function () {
             chrome.storage.local.set({selectedCompany: {uuid: result.uuid, name: result.name}}, function () {
                 const widget = container.parentElement;
@@ -147,9 +228,21 @@ function updateCompanyResults(container, results, searchInput, input) {
                 header.textContent = `Company selected: ${result.name}`
                 backButton.style.display = 'block';
                 setupDataSearch(searchInput, container, result.uuid, input);
+                searchInput.value = '';
+                searchInput.focus();
             });
         });
+        resultItem.addEventListener('mouseover', function () {
+            //remove the hovered class from all the result items
+            const hoveredItem = container.querySelector('.result-item.hovered');
+            if (hoveredItem) {
+                hoveredItem.classList.remove('hovered');
+            }
+        });
         container.appendChild(resultItem);
+        if (index === 0) {
+            setHoveredResult(resultItem);
+        }
     });
 }
 
@@ -163,6 +256,7 @@ function createResultItem(text) {
 function updateResultsContainer(container, data, input) {
     container.innerHTML = '';
     const searchInput = container.previousSibling;
+    console.log(searchInput)
     searchInput.addEventListener('input', function () {
         const query = searchInput.value.toLowerCase();
         const results = data.filter(item => item.key.toLowerCase().includes(query));
@@ -172,18 +266,39 @@ function updateResultsContainer(container, data, input) {
 
 function updateDataResults(container, results, element) {
     container.innerHTML = '';
-    results.forEach(result => {
+    results.forEach((result, index) => {
         const resultItem = createResultItem(result.key);
+
         resultItem.addEventListener('click', function () {
             if (isInputOrTextarea(element)) {
-                element.value = result.value;
+                const value = element.value;
+                const lastIndex = value.lastIndexOf('//');
+                console.log(lastIndex);
+                if (lastIndex !== -1) {
+                    console.log(value.substring(0, lastIndex));
+                    element.value = value.substring(0, lastIndex) + result.value;
+                }
             } else {
-                element.textContent = result.value;
+                const textContent = element.textContent;
+                const lastIndex = textContent.lastIndexOf('//');
+                if (lastIndex !== -1) {
+                    element.textContent = textContent.substring(0, lastIndex) + result.value;
+                }
             }
             container.parentElement.remove();
             document.removeEventListener('click', handleClickOutside);
         });
+        resultItem.addEventListener('mouseover', function () {
+            //remove the hovered class from all the result items
+            const hoveredItem = container.querySelector('.result-item.hovered');
+            if (hoveredItem) {
+                hoveredItem.classList.remove('hovered');
+            }
+        });
         container.appendChild(resultItem);
+        if (index === 0) {
+            setHoveredResult(resultItem);
+        }
     });
 }
 
