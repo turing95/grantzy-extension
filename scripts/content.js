@@ -43,7 +43,7 @@ function isInputOrTextarea(element) {
 }
 
 function createFooter(widget) {
-     const footer = document.createElement('div');
+    const footer = document.createElement('div');
     footer.classList.add('grantzy-widget-footer');
 
     const logo = document.createElement('img');
@@ -246,10 +246,21 @@ function updateCompanyResults(container, results, searchInput, input) {
     });
 }
 
-function createResultItem(text) {
+function createResultItem(key, value) {
     const resultItem = document.createElement('div');
-    resultItem.textContent = text;
     resultItem.classList.add('result-item');
+
+    const keySpan = document.createElement('span');
+    keySpan.textContent = key;
+    resultItem.appendChild(keySpan);
+    if (value) {
+        const valueSpan = document.createElement('span');
+        valueSpan.textContent = value.length > 20 ? value.substring(0, 20) + '...' : value;
+        valueSpan.style.float = 'right';
+        resultItem.appendChild(valueSpan);
+    }
+
+
     return resultItem;
 }
 
@@ -267,15 +278,13 @@ function updateResultsContainer(container, data, input) {
 function updateDataResults(container, results, element) {
     container.innerHTML = '';
     results.forEach((result, index) => {
-        const resultItem = createResultItem(result.key);
+        const resultItem = createResultItem(result.key, result.value);
 
         resultItem.addEventListener('click', function () {
             if (isInputOrTextarea(element)) {
                 const value = element.value;
                 const lastIndex = value.lastIndexOf('//');
-                console.log(lastIndex);
                 if (lastIndex !== -1) {
-                    console.log(value.substring(0, lastIndex));
                     element.value = value.substring(0, lastIndex) + result.value;
                 }
             } else {
