@@ -2,7 +2,6 @@ document.addEventListener('keyup', handleKeyUp);
 
 const observer = new MutationObserver(mutations => {
     mutations.forEach(mutation => {
-        console.log(mutation);
         if (mutation.type === 'characterData' && mutation.target.data.slice(-2) === '//') {
             displayCompanySearchWidget(mutation.target.parentElement);
         }
@@ -21,7 +20,6 @@ chrome.runtime.sendMessage(
             console.error("Message Error:", chrome.runtime.lastError);
         } else if (response.success) {
             companies = response.companies;
-            console.log("Fetched Companies:", companies);
         } else {
             console.error("Error fetching companies:", response.error);
         }
@@ -31,7 +29,6 @@ chrome.runtime.sendMessage(
 
 function handleKeyUp(event) {
     const element = event.target;
-    console.log(event);
     if (element.value.slice(-2) === '//') {
         displayCompanySearchWidget(element);
     }
@@ -57,6 +54,9 @@ function createFooter(widget) {
 }
 
 function displayCompanySearchWidget(element) {
+    if (document.querySelector('.grantzy-widget')) {
+        return;
+    }
     if (isInputOrTextarea(element)) {
         element.autocomplete = 'off';
     }
@@ -68,7 +68,6 @@ function displayCompanySearchWidget(element) {
     const resultsContainer = createResultsContainer(widget);
 
     chrome.storage.local.get('selectedCompany', function (data) {
-        console.log(data);
         if (data.selectedCompany) {
             header.textContent = `Company selected: ${data.selectedCompany.name}`;
             backButton.style.display = 'block';
@@ -134,7 +133,6 @@ function createResultsContainer(widget) {
 
 function setupDataSearch(searchInput, resultsContainer, companyId, input) {
     searchInput.placeholder = 'Search data...';
-    // Send message to background script to fetch company data
     chrome.runtime.sendMessage(
         {action: "fetchCompanyData", companyId: companyId},
         (response) => {
@@ -143,13 +141,12 @@ function setupDataSearch(searchInput, resultsContainer, companyId, input) {
             } else if (response.success) {
                 const fields = flattenFields(response.data.fields);
                 updateResultsContainer(resultsContainer, fields, input);
-                firstResultAutoSelection(resultsContainer, input);
+                resultsSelection(resultsContainer, searchInput);
             } else {
                 console.error("Error fetching company data:", response.error);
             }
         }
     );
-    firstResultAutoSelection(resultsContainer, searchInput);
 
 }
 
@@ -173,36 +170,45 @@ function setHoveredResult(item) {
     item.classList.add('hovered');
 }
 
-function firstResultAutoSelection(resultsContainer, input) {
-    const firstResultItem = resultsContainer.querySelector('.result-item');
-    if (firstResultItem) {
-        setHoveredResult(firstResultItem);
+function addUniqueEventListener(element, event, listener) {
+    // Initialize a custom tracking set if it doesn't exist
+    if (!element._eventListeners) {
+        element._eventListeners = new Set();
     }
 
-    input.addEventListener('keydown', function (event) {
-        console.log(event.key);
-        if (event.key === 'Enter') {
-            const hoveredItem = resultsContainer.querySelector('.result-item.hovered');
-            if (hoveredItem) {
-                hoveredItem.click();
-            }
-        }
+    const listenerKey = `${event}-${listener.toString()}`;
 
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            const allItems = Array.from(resultsContainer.querySelectorAll('.result-item'));
-            let currentIndex = allItems.findIndex(item => item.classList.contains('hovered'));
-            if (currentIndex === -1) currentIndex = 0;
+    // Add listener only if it's not already added
+    if (!element._eventListeners.has(listenerKey)) {
+        element.addEventListener(event, listener);
+        element._eventListeners.add(listenerKey);
+    }
+}
 
-            if (event.key === 'ArrowDown') {
-                const nextIndex = (currentIndex + 1) % allItems.length;
-                setHoveredResult(allItems[nextIndex]);
-            } else if (event.key === 'ArrowUp') {
-                const prevIndex = (currentIndex - 1 + allItems.length) % allItems.length;
-                setHoveredResult(allItems[prevIndex]);
-            }
-            event.preventDefault(); // Prevent cursor from moving inside the input
+function resultsSelection(resultsContainer, input) {
+
+    function handleKeydown(event) {
+        event.stopPropagation();
+        const allItems = Array.from(resultsContainer.querySelectorAll('.result-item'));
+        console.log(allItems);
+        if (!allItems.length) return;
+
+        let currentIndex = allItems.findIndex(item => item.classList.contains('hovered'));
+        if (event.key === 'ArrowDown') {
+            const nextIndex = (currentIndex + 1) % allItems.length;
+            setHoveredResult(allItems[nextIndex]);
+            event.preventDefault();
+        } else if (event.key === 'ArrowUp') {
+            const prevIndex = currentIndex === -1 ? allItems.length - 1 : (currentIndex - 1 + allItems.length) % allItems.length;
+            setHoveredResult(allItems[prevIndex]);
+            event.preventDefault();
+        } else if (event.key === 'Enter') {
+            const hoveredItem = currentIndex >= 0 ? allItems[currentIndex] : allItems[0];
+            if (hoveredItem) hoveredItem.click();
+            event.preventDefault();
         }
-    });
+    }
+        addUniqueEventListener(input, 'keydown', handleKeydown);
 }
 
 function setupCompanySearch(searchInput, resultsContainer, input) {
@@ -211,8 +217,9 @@ function setupCompanySearch(searchInput, resultsContainer, input) {
         const query = searchInput.value.toLowerCase();
         const results = companies.filter(company => company.name.toLowerCase().includes(query));
         updateCompanyResults(resultsContainer, results, searchInput, input);
+        resultsSelection(resultsContainer, searchInput);
+
     });
-    firstResultAutoSelection(resultsContainer, searchInput);
 }
 
 function updateCompanyResults(container, results, searchInput, input) {
@@ -233,15 +240,9 @@ function updateCompanyResults(container, results, searchInput, input) {
             });
         });
         resultItem.addEventListener('mouseover', function () {
-            //remove the hovered class from all the result items
-            const hoveredItem = container.querySelector('.result-item.hovered');
-            if (hoveredItem) {
-                hoveredItem.classList.remove('hovered');
-            }
-            resultItem.classList.add('hovered');
+            setHoveredResult(resultItem);
 
         });
-
         container.appendChild(resultItem);
         if (index === 0) {
             setHoveredResult(resultItem);
@@ -270,11 +271,11 @@ function createResultItem(key, value) {
 function updateResultsContainer(container, data, input) {
     container.innerHTML = '';
     const searchInput = container.previousSibling;
-    console.log(searchInput)
     searchInput.addEventListener('input', function () {
         const query = searchInput.value.toLowerCase();
         const results = data.filter(item => item.key.toLowerCase().includes(query));
         updateDataResults(container, results, input);
+        resultsSelection(container, searchInput);
     });
 }
 
@@ -301,12 +302,7 @@ function updateDataResults(container, results, element) {
             document.removeEventListener('click', handleClickOutside);
         });
         resultItem.addEventListener('mouseover', function () {
-
-            const hoveredItem = container.querySelector('.result-item.hovered');
-            if (hoveredItem) {
-                hoveredItem.classList.remove('hovered');
-            }
-            resultItem.classList.add('hovered');
+            setHoveredResult(resultItem);
         });
         container.appendChild(resultItem);
         if (index === 0) {
