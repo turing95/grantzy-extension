@@ -1,9 +1,8 @@
 document.addEventListener('keyup', handleKeyUp);
 
-
 const observer = new MutationObserver(mutations => {
     mutations.forEach(mutation => {
-        //check if mutation type is character data and if the data ends with '//'
+        console.log(mutation);
         if (mutation.type === 'characterData' && mutation.target.data.slice(-2) === '//') {
             displayCompanySearchWidget(mutation.target.parentElement);
         }
@@ -31,9 +30,10 @@ chrome.runtime.sendMessage(
 
 
 function handleKeyUp(event) {
-    const input = event.target;
-    if (isInputOrTextarea(input) && input.value.slice(-2) === '//') {
-        displayCompanySearchWidget(input);
+    const element = event.target;
+    console.log(event);
+    if (element.value.slice(-2) === '//') {
+        displayCompanySearchWidget(element);
     }
 }
 
@@ -238,7 +238,10 @@ function updateCompanyResults(container, results, searchInput, input) {
             if (hoveredItem) {
                 hoveredItem.classList.remove('hovered');
             }
+            resultItem.classList.add('hovered');
+
         });
+
         container.appendChild(resultItem);
         if (index === 0) {
             setHoveredResult(resultItem);
@@ -298,11 +301,12 @@ function updateDataResults(container, results, element) {
             document.removeEventListener('click', handleClickOutside);
         });
         resultItem.addEventListener('mouseover', function () {
-            //remove the hovered class from all the result items
+
             const hoveredItem = container.querySelector('.result-item.hovered');
             if (hoveredItem) {
                 hoveredItem.classList.remove('hovered');
             }
+            resultItem.classList.add('hovered');
         });
         container.appendChild(resultItem);
         if (index === 0) {
