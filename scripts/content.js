@@ -10,7 +10,6 @@ const observer = new MutationObserver(mutations => {
                 }
             });
         } else if (mutation.type === 'characterData' && mutation.target.data.slice(-2) === '//') {
-            console.log(mutation);
             displayCompanySearchWidget(mutation.target.parentElement);
         }
     });
@@ -88,15 +87,12 @@ function displayCompanySearchWidget(element) {
     if (document.querySelector('.grantzy-widget')) {
         return;
     }
-        console.log(element);
-        console.log(document.activeElement);
 
     // Check if the element is an input or textarea and if it is currently focused
     if (!isInputOrTextarea(element) && document.activeElement !== element) {
         return;
     }
 
-    console.log(element);
 
     if (isInputOrTextarea(element)) {
         element.autocomplete = 'off';
@@ -236,7 +232,6 @@ function resultsSelection(resultsContainer, input) {
     function handleKeydown(event) {
         event.stopPropagation();
         const allItems = Array.from(resultsContainer.querySelectorAll('.result-item'));
-        console.log(allItems);
         if (!allItems.length) return;
 
         let currentIndex = allItems.findIndex(item => item.classList.contains('hovered'));
@@ -336,7 +331,6 @@ function setupCompanySearch(searchInput, resultsContainer, input) {
     searchInput.placeholder = 'Search company...';
     searchInput.addEventListener('input', function () {
         const query = searchInput.value.toLowerCase().trim();
-        console.log("Query Entered:", query);
 
         // Normalize the query for better matching
         const normalizedQuery = normalizeString(query);
@@ -348,7 +342,6 @@ function setupCompanySearch(searchInput, resultsContainer, input) {
             .filter(result => result.relevance > 0.3) // Filter out low-relevance matches
             .sort((a, b) => b.relevance - a.relevance); // Sort by relevance descending
 
-        console.log("Ranked Results:", rankedResults);
 
         // Update UI with ranked results
         const filteredResults = rankedResults.map(r => r.company);
