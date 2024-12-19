@@ -1,6 +1,9 @@
+import config from './env.js';
+const apiBaseUrl = config.API_URL;
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "fetchCompanies") {
-        fetch('https://grantzy.com/api/companies/')
+        fetch(apiBaseUrl + '/api/companies')
             .then(response => response.json())
             .then(data => {
                 sendResponse({success: true, companies: data});
@@ -12,7 +15,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Required to keep the message channel open for asynchronous responses
         return true;
     } else if (message.action === "fetchCompanyData" && message.companyId) {
-        fetch(`https://grantzy.com/api/companies/${message.companyId}`)
+        fetch(apiBaseUrl + `/api/companies/${message.companyId}`)
             .then(response => response.json())
             .then(data => {
                 sendResponse({success: true, data: data});

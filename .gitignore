@@ -6,4 +6,4 @@ dist
 .cache
 
 .idea
-.env
+scripts/env.js
