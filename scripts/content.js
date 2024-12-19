@@ -27,6 +27,7 @@ chrome.runtime.sendMessage(
 );
 
 
+
 function handleKeyUp(event) {
     const element = event.target;
     if (element.value.slice(-2) === '//') {
@@ -211,14 +212,102 @@ function resultsSelection(resultsContainer, input) {
         addUniqueEventListener(input, 'keydown', handleKeydown);
 }
 
+function calculateRelevance(query, target) {
+    query = query.toLowerCase().trim();
+    target = target.toLowerCase().trim();
+
+    // Tokenize both query and target
+    const queryTokens = normalizeTokens(query);
+    const targetTokens = normalizeTokens(target);
+
+    // Exact Substring Match (for full query match)
+    const substringScore = target.includes(query) ? 1 : 0;
+
+    // Token Matching (ignoring order)
+    const matchedTokens = queryTokens.filter(token => targetTokens.includes(token));
+    const tokenScore = matchedTokens.length / queryTokens.length; // Matching tokens based on query length
+
+    // Token Reordering Match
+    const reorderedMatch = queryTokens.every(token => targetTokens.includes(token)) ? 1 : 0;
+
+    // Concatenated Token Match
+    const concatenatedQuery = queryTokens.join('');
+    const concatenatedTarget = targetTokens.join('');
+    const concatenatedMatch = concatenatedTarget.includes(concatenatedQuery) ? 1 : 0;
+
+    // Levenshtein Distance for fuzzy comparison (accounting for typos)
+    const levenshteinScore = 1 - levenshteinDistance(concatenatedQuery, concatenatedTarget) / Math.max(concatenatedQuery.length, concatenatedTarget.length);
+
+    // Combine scores with weights
+    return (
+        2 * substringScore + // Prioritize exact matches (for full query match)
+        1 * tokenScore +      // Reward partial matches for token overlaps
+        1 * reorderedMatch +  // Reward token reordering matches
+        1 * concatenatedMatch + // Reward concatenated token matches
+        0.5 * levenshteinScore // Account for minor typos using Levenshtein distance
+    );
+}
+
+// Levenshtein distance function
+function levenshteinDistance(a, b) {
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+
+    const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
+
+    for (let j = 0; j <= a.length; j++) {
+        matrix[0][j] = j;
+    }
+
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b[i - 1] === a[j - 1]) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1, // Substitution
+                    matrix[i][j - 1] + 1,     // Insertion
+                    matrix[i - 1][j] + 1      // Deletion
+                );
+            }
+        }
+    }
+
+    return matrix[b.length][a.length];
+}
+
+// Tokenize the string by normalizing and splitting by spaces
+function normalizeTokens(str) {
+    return normalizeString(str).split(/\s+/);
+}
+
+// Normalize string by removing spaces, periods, and underscores
+function normalizeString(str) {
+    return str.replace(/[\s._]+/g, '').toLowerCase();
+}
+
 function setupCompanySearch(searchInput, resultsContainer, input) {
     searchInput.placeholder = 'Search company...';
     searchInput.addEventListener('input', function () {
-        const query = searchInput.value.toLowerCase();
-        const results = companies.filter(company => company.name.toLowerCase().includes(query));
-        updateCompanyResults(resultsContainer, results, searchInput, input);
-        resultsSelection(resultsContainer, searchInput);
+        const query = searchInput.value.toLowerCase().trim();
+        console.log("Query Entered:", query);
 
+       // Normalize the query for better matching
+        const normalizedQuery = normalizeString(query);
+        const rankedResults = companies
+            .map(company => ({
+                company,
+                relevance: calculateRelevance(normalizedQuery, normalizeString(company.name)),
+            }))
+            .filter(result => result.relevance > 0.3) // Filter out low-relevance matches
+            .sort((a, b) => b.relevance - a.relevance); // Sort by relevance descending
+
+        console.log("Ranked Results:", rankedResults);
+
+        // Update UI with ranked results
+        const filteredResults = rankedResults.map(r => r.company);
+        updateCompanyResults(resultsContainer, filteredResults, searchInput, input);
+        resultsSelection(resultsContainer, searchInput);
     });
 }
 
@@ -272,9 +361,26 @@ function updateResultsContainer(container, data, input) {
     container.innerHTML = '';
     const searchInput = container.previousSibling;
     searchInput.addEventListener('input', function () {
-        const query = searchInput.value.toLowerCase();
-        const results = data.filter(item => item.key.toLowerCase().includes(query));
-        updateDataResults(container, results, input);
+        const query = searchInput.value.toLowerCase().trim();
+        if (!query) {
+            container.innerHTML = ''; // Clear results if query is empty
+            return;
+        }
+
+        // Normalize the query for better matching
+        const normalizedQuery = normalizeString(query);
+
+        // Rank and filter results using fuzzy matching
+        const rankedResults = data
+            .map(item => ({
+                item,
+                relevance: calculateRelevance(normalizedQuery, normalizeString(item.key)), // Using normalized keys
+            }))
+            .filter(result => result.relevance > 0.3) // Filter out low-relevance results
+            .sort((a, b) => b.relevance - a.relevance); // Sort by relevance
+
+        const filteredResults = rankedResults.map(r => r.item);
+        updateDataResults(container, filteredResults, input);
         resultsSelection(container, searchInput);
     });
 }
