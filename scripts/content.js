@@ -2,13 +2,43 @@ document.addEventListener('keyup', handleKeyUp);
 
 const observer = new MutationObserver(mutations => {
     mutations.forEach(mutation => {
-        if (mutation.type === 'characterData' && mutation.target.data.slice(-2) === '//') {
+        if (mutation.type === 'childList') {
+            // Add listeners to all added nodes
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    attachListenersToAllElements(node);
+                }
+            });
+        } else if (mutation.type === 'characterData' && mutation.target.data.slice(-2) === '//') {
+            console.log(mutation);
             displayCompanySearchWidget(mutation.target.parentElement);
         }
     });
 });
 
-observer.observe(document.body, {childList: true, subtree: true, attributes: true, characterData: true});
+observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true
+});
+
+// Attach listener to all elements
+function attachListenersToAllElements(element) {
+    addKeyUpListener(element);
+
+    // Recursively add listeners to all child nodes
+    element.querySelectorAll('*').forEach(child => {
+        addKeyUpListener(child);
+    });
+}
+
+// Add the keyup listener
+function addKeyUpListener(element) {
+    if (!element._hasKeyUpListener) { // Prevent duplicate listeners
+        element.addEventListener('keyup', handleKeyUp);
+        element._hasKeyUpListener = true; // Custom property to mark as processed
+    }
+}
 
 let companies = [];
 
@@ -27,10 +57,9 @@ chrome.runtime.sendMessage(
 );
 
 
-
 function handleKeyUp(event) {
     const element = event.target;
-    if (element.value.slice(-2) === '//') {
+    if (element.value && element.value.slice(-2) === '//') {
         displayCompanySearchWidget(element);
     }
 }
@@ -54,13 +83,25 @@ function createFooter(widget) {
 
 }
 
+
 function displayCompanySearchWidget(element) {
     if (document.querySelector('.grantzy-widget')) {
         return;
     }
+        console.log(element);
+        console.log(document.activeElement);
+
+    // Check if the element is an input or textarea and if it is currently focused
+    if (!isInputOrTextarea(element) && document.activeElement !== element) {
+        return;
+    }
+
+    console.log(element);
+
     if (isInputOrTextarea(element)) {
         element.autocomplete = 'off';
     }
+
     const widget = createWidget(element);
     const header = createHeader(widget);
     const backButton = createBackButton(widget, header);
@@ -79,8 +120,6 @@ function displayCompanySearchWidget(element) {
             setupCompanySearch(searchInput, resultsContainer, element);
         }
     });
-    //createFooter(widget);
-
 
     document.body.appendChild(widget);
     searchInput.focus();
@@ -107,16 +146,17 @@ function createBackButton(widget, header) {
     return backButton;
 }
 
-function createWidget(input) {
+function createWidget(element) {
     const widget = document.createElement('div');
     widget.classList.add('grantzy-widget');
 
-    const rect = input.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
     widget.style.top = `${rect.bottom + window.scrollY}px`;
     widget.style.left = `${rect.left + window.scrollX}px`;
 
     return widget;
 }
+
 
 function createSearchInput(widget) {
     const searchInput = document.createElement('input');
@@ -128,6 +168,11 @@ function createSearchInput(widget) {
 function createResultsContainer(widget) {
     const resultsContainer = document.createElement('div');
     resultsContainer.classList.add('results-container');
+
+    // Set a fixed height and make it scrollable
+    resultsContainer.style.maxHeight = '300px'; // Adjust the height as needed
+    resultsContainer.style.overflowY = 'auto';  // Allow vertical scrolling if the content exceeds the max height
+
     widget.appendChild(resultsContainer);
     return resultsContainer;
 }
@@ -209,7 +254,8 @@ function resultsSelection(resultsContainer, input) {
             event.preventDefault();
         }
     }
-        addUniqueEventListener(input, 'keydown', handleKeydown);
+
+    addUniqueEventListener(input, 'keydown', handleKeydown);
 }
 
 function calculateRelevance(query, target) {
@@ -253,7 +299,7 @@ function levenshteinDistance(a, b) {
     if (!a.length) return b.length;
     if (!b.length) return a.length;
 
-    const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
+    const matrix = Array.from({length: b.length + 1}, (_, i) => [i]);
 
     for (let j = 0; j <= a.length; j++) {
         matrix[0][j] = j;
@@ -292,7 +338,7 @@ function setupCompanySearch(searchInput, resultsContainer, input) {
         const query = searchInput.value.toLowerCase().trim();
         console.log("Query Entered:", query);
 
-       // Normalize the query for better matching
+        // Normalize the query for better matching
         const normalizedQuery = normalizeString(query);
         const rankedResults = companies
             .map(company => ({
@@ -397,6 +443,12 @@ function updateDataResults(container, results, element) {
                 if (lastIndex !== -1) {
                     element.value = value.substring(0, lastIndex) + result.value;
                 }
+                let evnt = new InputEvent('input', {
+                    bubbles: true,
+                    cancelable: true,
+                    inputType: 'insertFromPaste'
+                });
+                element.dispatchEvent(evnt);
             } else {
                 const textContent = element.textContent;
                 const lastIndex = textContent.lastIndexOf('//');
