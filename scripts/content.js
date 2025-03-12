@@ -10,7 +10,7 @@ const observer = new MutationObserver(mutations => {
                 }
             });
         } else if (mutation.type === 'characterData' && mutation.target.data.slice(-2) === '//') {
-            displayCompanySearchWidget(mutation.target.parentElement);
+            displayApplicationSearchWidget(mutation.target.parentElement);
         }
     });
 });
@@ -39,18 +39,18 @@ function addKeyUpListener(element) {
     }
 }
 
-let companies = [];
+let applications = [];
 
 // Send a message to the background script
 chrome.runtime.sendMessage(
-    {action: "fetchCompanies"},
+    {action: "fetchApplications"},
     (response) => {
         if (chrome.runtime.lastError) {
             console.error("Message Error:", chrome.runtime.lastError);
         } else if (response.success) {
-            companies = response.companies;
+            applications = response.applications;
         } else {
-            console.error("Error fetching companies:", response.error);
+            console.error("Error fetching applications:", response.error);
         }
     }
 );
@@ -59,7 +59,7 @@ chrome.runtime.sendMessage(
 function handleKeyUp(event) {
     const element = event.target;
     if (element.value && element.value.slice(-2) === '//') {
-        displayCompanySearchWidget(element);
+        displayApplicationSearchWidget(element);
     }
 }
 
@@ -83,7 +83,7 @@ function createFooter(widget) {
 }
 
 
-function displayCompanySearchWidget(element) {
+function displayApplicationSearchWidget(element) {
     if (document.querySelector('.grantzy-widget')) {
         return;
     }
@@ -99,21 +99,22 @@ function displayCompanySearchWidget(element) {
     }
 
     const widget = createWidget(element);
+
     const header = createHeader(widget);
     const backButton = createBackButton(widget, header);
 
     const searchInput = createSearchInput(widget);
     const resultsContainer = createResultsContainer(widget);
 
-    chrome.storage.local.get('selectedCompany', function (data) {
-        if (data.selectedCompany) {
-            header.textContent = `Company selected: ${data.selectedCompany.name}`;
+    chrome.storage.local.get('selectedApplication', function (data) {
+        if (data.selectedApplication) {
+            header.textContent = `Application selected: ${data.selectedApplication.title} | ${data.selectedApplication.companyName}`;
             backButton.style.display = 'block';
-            setupDataSearch(searchInput, resultsContainer, data.selectedCompany.uuid, element);
+            setupDataSearch(searchInput, resultsContainer, data.selectedApplication.uuid, element);
         } else {
-            header.textContent = 'Select a company';
+            header.textContent = 'Select an application';
             backButton.style.display = 'none';
-            setupCompanySearch(searchInput, resultsContainer, element);
+            setupApplicationSearch(searchInput, resultsContainer, element);
         }
     });
 
@@ -124,16 +125,26 @@ function displayCompanySearchWidget(element) {
 
 function createBackButton(widget, header) {
     const backButton = document.createElement('button');
-    backButton.textContent = 'Select another company';
+    backButton.textContent = 'Select another application';
     backButton.style.display = 'none';
     backButton.addEventListener('click', function () {
         const searchInput = widget.querySelector('input[type="text"]');
-        chrome.storage.local.remove('selectedCompany', function () {
+        chrome.storage.local.remove('selectedApplication', function () {
             const resultsContainer = widget.querySelector('.results-container');
+
             resultsContainer.innerHTML = '';
-            backButton.style.display = 'none';
-            header.textContent = 'Select a company';
-            setupCompanySearch(searchInput, resultsContainer, searchInput);
+            const loader = createLoader();
+            searchInput.disabled = true;
+            resultsContainer.appendChild(loader);
+
+            setupApplicationSearch(searchInput, resultsContainer, searchInput, function () {
+                loader.remove();
+                header.textContent = 'Select an application';
+                backButton.style.display = 'none';
+                searchInput.disabled = false;
+                searchInput.value = '';
+                searchInput.focus();
+            });
         });
         searchInput.value = '';
         searchInput.focus();
@@ -145,10 +156,38 @@ function createBackButton(widget, header) {
 function createWidget(element) {
     const widget = document.createElement('div');
     widget.classList.add('grantzy-widget');
+    widget.style.position = 'fixed';
+    widget.style.visibility = 'hidden'; // Hide initially while positioning
+    document.body.appendChild(widget);
 
-    const rect = element.getBoundingClientRect();
-    widget.style.top = `${rect.bottom + window.scrollY}px`;
-    widget.style.left = `${rect.left + window.scrollX}px`;
+    const spacing = 20; // Minimum spacing from the bottom of the viewport
+
+    // Function to update widget's position based on its current height
+    function updatePosition() {
+        const rect = element.getBoundingClientRect();
+        let top = rect.bottom;
+        widget.style.left = `${rect.left}px`;
+        const widgetHeight = widget.offsetHeight;
+        const viewportHeight = window.innerHeight;
+
+        // Adjust the top if the widget would overflow the bottom edge
+        if (top + widgetHeight > viewportHeight - spacing) {
+            top = viewportHeight - spacing - widgetHeight;
+        }
+        widget.style.top = `${top}px`;
+    }
+
+    // Observe the widget for changes so that position is recalculated when its content updates
+    const observer = new MutationObserver(() => {
+        updatePosition();
+    });
+    observer.observe(widget, { childList: true, subtree: true });
+
+    // Use requestAnimationFrame to allow the widget to render before positioning it
+    requestAnimationFrame(() => {
+        updatePosition();
+        widget.style.visibility = 'visible';
+    });
 
     return widget;
 }
@@ -173,19 +212,29 @@ function createResultsContainer(widget) {
     return resultsContainer;
 }
 
-function setupDataSearch(searchInput, resultsContainer, companyId, input) {
+function setupDataSearch(searchInput, resultsContainer, applicationId, input, callback) {
     searchInput.placeholder = 'Search data...';
     chrome.runtime.sendMessage(
-        {action: "fetchCompanyData", companyId: companyId},
+        {action: "fetchApplicationData", applicationId: applicationId},
         (response) => {
             if (chrome.runtime.lastError) {
                 console.error("Message Error:", chrome.runtime.lastError);
+                if (callback) callback();
+
             } else if (response.success) {
+                chrome.storage.local.set({
+                selectedApplicationData: {
+                    fields: response.data.fields
+                }
+                });
                 const fields = flattenFields(response.data.fields);
                 updateResultsContainer(resultsContainer, fields, input);
                 resultsSelection(resultsContainer, searchInput);
+                if (callback) callback();
+
             } else {
-                console.error("Error fetching company data:", response.error);
+                console.error("Error fetching application data:", response.error);
+                if (callback) callback();
             }
         }
     );
@@ -327,44 +376,68 @@ function normalizeString(str) {
     return str.replace(/[\s._]+/g, '').toLowerCase();
 }
 
-function setupCompanySearch(searchInput, resultsContainer, input) {
-    searchInput.placeholder = 'Search company...';
+function createLoader() {
+    const loader = document.createElement('div');
+    loader.classList.add('loader');
+    loader.textContent = 'Loading data...'; // Or use a spinner graphic if desired
+    return loader;
+}
+
+function setupApplicationSearch(searchInput, resultsContainer, input, callback) {
+    searchInput.placeholder = 'Search applications...';
     searchInput.addEventListener('input', function () {
         const query = searchInput.value.toLowerCase().trim();
 
         // Normalize the query for better matching
         const normalizedQuery = normalizeString(query);
-        const rankedResults = companies
-            .map(company => ({
-                company,
-                relevance: calculateRelevance(normalizedQuery, normalizeString(company.name)),
+        const rankedResults = applications
+            .map(application => ({
+                application,
+                relevance: calculateRelevance(normalizedQuery, normalizeString(application.title)),
             }))
             .filter(result => result.relevance > 0.3) // Filter out low-relevance matches
             .sort((a, b) => b.relevance - a.relevance); // Sort by relevance descending
 
 
         // Update UI with ranked results
-        const filteredResults = rankedResults.map(r => r.company);
-        updateCompanyResults(resultsContainer, filteredResults, searchInput, input);
+        const filteredResults = rankedResults.map(r => r.application);
+        updateApplicationResults(resultsContainer, filteredResults, searchInput, input);
         resultsSelection(resultsContainer, searchInput);
     });
+    if (callback) callback();
+
 }
 
-function updateCompanyResults(container, results, searchInput, input) {
+function updateApplicationResults(container, results, searchInput, input) {
     container.innerHTML = '';
     results.forEach((result, index) => {
-        const resultItem = createResultItem(result.name);
+        const resultItem = createResultItem(result.title, result.company_name);
+
 
         resultItem.addEventListener('click', function () {
-            chrome.storage.local.set({selectedCompany: {uuid: result.uuid, name: result.name}}, function () {
+
+            chrome.storage.local.set({
+                selectedApplication: {
+                    uuid: result.uuid,
+                    title: result.title,
+                    companyName: result.company_name
+                }
+            }, function () {
                 const widget = container.parentElement;
                 const header = widget.querySelector('.widget-header');
                 const backButton = widget.querySelector('button');
-                header.textContent = `Company selected: ${result.name}`
-                backButton.style.display = 'block';
-                setupDataSearch(searchInput, container, result.uuid, input);
-                searchInput.value = '';
-                searchInput.focus();
+                container.innerHTML = '';
+                const loader = createLoader();
+                searchInput.disabled = true;
+                container.appendChild(loader);
+                setupDataSearch(searchInput, container, result.uuid, input, function () {
+                    loader.remove();
+                    header.textContent = `Application selected: ${result.title} | ${result.company_name}`
+                    backButton.style.display = 'block';
+                    searchInput.disabled = false;
+                    searchInput.value = '';
+                    searchInput.focus();
+                });
             });
         });
         resultItem.addEventListener('mouseover', function () {
