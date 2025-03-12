@@ -58,6 +58,7 @@ chrome.runtime.sendMessage(
 
 function handleKeyUp(event) {
     const element = event.target;
+    console.log('porco dioo infame')
     if (element.value && element.value.slice(-2) === '//') {
         displayApplicationSearchWidget(element);
     }

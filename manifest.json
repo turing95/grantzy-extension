@@ -19,7 +19,7 @@
         "styles/content.css"
       ],
       "js": [
-        "scripts/content.js"
+        "dist/bundle.js"
       ],
       "matches": [
         "<all_urls>"

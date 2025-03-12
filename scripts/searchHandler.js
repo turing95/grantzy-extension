@@ -1,0 +1,285 @@
+import { normalizeString, normalizeTokens, levenshteinDistance, addUniqueEventListener } from './utils.js';
+
+let applications = [];
+
+// Fetch applications when the module loads.
+fetchApplications();
+
+export function fetchApplications() {
+  chrome.runtime.sendMessage({ action: "fetchApplications" }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error("Message Error:", chrome.runtime.lastError);
+    } else if (response.success) {
+      applications = response.applications;
+    } else {
+      console.error("Error fetching applications:", response.error);
+    }
+  });
+}
+
+export function setupApplicationSearch(searchInput, resultsContainer, targetElement, callback) {
+  searchInput.placeholder = 'Search applications...';
+  searchInput.addEventListener('input', function () {
+    const query = searchInput.value.toLowerCase().trim();
+    const normalizedQuery = normalizeString(query);
+    const rankedResults = applications
+      .map(application => ({
+        application,
+        relevance: calculateRelevance(normalizedQuery, normalizeString(application.title))
+      }))
+      .filter(result => result.relevance > 0.3)
+      .sort((a, b) => b.relevance - a.relevance);
+    const filteredResults = rankedResults.map(r => r.application);
+    updateApplicationResults(resultsContainer, filteredResults, searchInput, targetElement);
+    resultsSelection(resultsContainer, searchInput);
+  });
+  if (callback) callback();
+}
+
+export function setupDataSearch(searchInput, resultsContainer, applicationId, targetElement, callback) {
+  searchInput.placeholder = 'Search data...';
+  chrome.runtime.sendMessage({ action: "fetchApplicationData", applicationId: applicationId }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error("Message Error:", chrome.runtime.lastError);
+      if (callback) callback();
+    } else if (response.success) {
+      chrome.storage.local.set({
+        selectedApplicationData: {
+          fields: response.data.fields
+        }
+      });
+      const fields = flattenFields(response.data.fields);
+      updateResultsContainer(resultsContainer, fields, targetElement);
+      resultsSelection(resultsContainer, searchInput);
+      if (callback) callback();
+    } else {
+      console.error("Error fetching application data:", response.error);
+      if (callback) callback();
+    }
+  });
+}
+
+export function updateApplicationResults(container, results, searchInput, targetElement) {
+  container.innerHTML = '';
+  results.forEach((result, index) => {
+    const resultItem = createResultItem(result.title, result.company_name);
+    resultItem.addEventListener('click', function () {
+      chrome.storage.local.set({
+        selectedApplication: {
+          uuid: result.uuid,
+          title: result.title,
+          companyName: result.company_name
+        }
+      }, function () {
+        const widget = container.parentElement;
+        const header = widget.querySelector('.widget-header');
+        const backButton = widget.querySelector('button');
+        container.innerHTML = '';
+        const loader = createLoader();
+        searchInput.disabled = true;
+        container.appendChild(loader);
+        setupDataSearch(searchInput, container, result.uuid, targetElement, function () {
+          loader.remove();
+          header.textContent = `Application selected: ${result.title} | ${result.company_name}`;
+          backButton.style.display = 'block';
+          searchInput.disabled = false;
+          searchInput.value = '';
+          searchInput.focus();
+        });
+      });
+    });
+    resultItem.addEventListener('mouseover', function () {
+      setHoveredResult(resultItem, container);
+    });
+    container.appendChild(resultItem);
+    if (index === 0) {
+      setHoveredResult(resultItem, container);
+    }
+  });
+}
+
+export function updateResultsContainer(container, data, targetElement) {
+  container.innerHTML = '';
+  // Assume the search input is the previous sibling.
+  const searchInput = container.previousElementSibling;
+  searchInput.addEventListener('input', function () {
+    const query = searchInput.value.toLowerCase().trim();
+    // Use the selected search context if available; otherwise, use the full data.
+    const dataToSearch = targetElement.searchContextData
+      ? flattenFields(targetElement.searchContextData)
+      : data;
+    if (!query) {
+      // If the search input is empty, display all fields.
+      updateDataResults(container, dataToSearch, targetElement);
+      resultsSelection(container, searchInput);
+      return;
+    }
+    const normalizedQuery = normalizeString(query);
+    const rankedResults = dataToSearch
+      .map(item => ({
+        item,
+        relevance: calculateRelevance(normalizedQuery, normalizeString(item.key))
+      }))
+      .filter(result => result.relevance > 0.3)
+      .sort((a, b) => b.relevance - a.relevance);
+    const filteredResults = rankedResults.map(r => r.item);
+    updateDataResults(container, filteredResults, targetElement);
+    resultsSelection(container, searchInput);
+  });
+}// Helper function to show a toast message.
+function showToast(message, duration = 3000) {
+  const toast = document.createElement('div');
+  toast.className = 'toast-message';
+  toast.textContent = message;
+  // Basic inline styles (you can move these to your CSS if desired)
+  toast.style.position = 'fixed';
+  toast.style.bottom = '20px';
+  toast.style.right = '20px';
+  toast.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+  toast.style.color = '#fff';
+  toast.style.padding = '10px 20px';
+  toast.style.borderRadius = '5px';
+  toast.style.zIndex = '1100';
+  toast.style.opacity = '1';
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.style.transition = 'opacity 0.5s ease';
+    toast.style.opacity = '0';
+    setTimeout(() => {
+      toast.remove();
+    }, 500);
+  }, duration);
+}
+
+export function updateDataResults(container, results, targetElement) {
+  container.innerHTML = '';
+  results.forEach((result, index) => {
+    const resultItem = createResultItem(result.key, result.value);
+    /*resultItem.addEventListener('click', function () {
+      if (targetElement.value !== undefined) {
+        const value = targetElement.value;
+        const lastIndex = value.lastIndexOf('//');
+        if (lastIndex !== -1) {
+          targetElement.value = value.substring(0, lastIndex) + result.value;
+        }
+        const evnt = new InputEvent('input', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertFromPaste'
+        });
+        targetElement.dispatchEvent(evnt);
+      } else {
+        const textContent = targetElement.textContent;
+        const lastIndex = textContent.lastIndexOf('//');
+        if (lastIndex !== -1) {
+          targetElement.textContent = textContent.substring(0, lastIndex) + result.value;
+        }
+      }
+      // Remove the widget by removing its container.
+      container.parentElement.remove();
+    });*/
+      resultItem.addEventListener('click', function () {
+      navigator.clipboard.writeText(result.value)
+        .then(() => {
+          console.log("Copied to clipboard: " + result.value);
+          // Optionally, provide visual feedback or remove the widget.
+          //container.parentElement.remove();
+                      showToast("Copied to clipboard!");
+
+        })
+        .catch(err => {
+          console.error("Failed to copy text: ", err);
+        });
+    });
+    resultItem.addEventListener('mouseover', function () {
+      setHoveredResult(resultItem, container);
+    });
+    container.appendChild(resultItem);
+    if (index === 0) {
+      setHoveredResult(resultItem, container);
+    }
+  });
+}
+
+export function createResultItem(key, value) {
+  const resultItem = document.createElement('div');
+  resultItem.classList.add('result-item');
+  const keySpan = document.createElement('span');
+  keySpan.textContent = key;
+  resultItem.appendChild(keySpan);
+  if (value) {
+    const valueSpan = document.createElement('span');
+    valueSpan.textContent = value.length > 20 ? value.substring(0, 20) + '...' : value;
+    valueSpan.style.float = 'right';
+    resultItem.appendChild(valueSpan);
+  }
+  return resultItem;
+}
+
+export function createLoader() {
+  const loader = document.createElement('div');
+  loader.classList.add('loader');
+  loader.textContent = 'Loading data...';
+  return loader;
+}
+
+export function resultsSelection(resultsContainer, input) {
+  function handleKeydown(event) {
+    event.stopPropagation();
+    const allItems = Array.from(resultsContainer.querySelectorAll('.result-item'));
+    if (!allItems.length) return;
+    let currentIndex = allItems.findIndex(item => item.classList.contains('hovered'));
+    if (event.key === 'ArrowDown') {
+      const nextIndex = (currentIndex + 1) % allItems.length;
+      setHoveredResult(allItems[nextIndex], resultsContainer);
+      event.preventDefault();
+    } else if (event.key === 'ArrowUp') {
+      const prevIndex = currentIndex === -1 ? allItems.length - 1 : (currentIndex - 1 + allItems.length) % allItems.length;
+      setHoveredResult(allItems[prevIndex], resultsContainer);
+      event.preventDefault();
+    } else if (event.key === 'Enter') {
+      const hoveredItem = currentIndex >= 0 ? allItems[currentIndex] : allItems[0];
+      if (hoveredItem) hoveredItem.click();
+      event.preventDefault();
+    }
+  }
+  addUniqueEventListener(input, 'keydown', handleKeydown);
+}
+
+export function setHoveredResult(item, container) {
+  const currentHovered = container.querySelector('.result-item.hovered');
+  if (currentHovered) {
+    currentHovered.classList.remove('hovered');
+  }
+  item.classList.add('hovered');
+}
+
+export function flattenFields(fields, parentKey = '', result = []) {
+  for (const key in fields) {
+    const newKey = parentKey ? `${parentKey}.${key}` : key;
+    if (typeof fields[key] === 'object' && fields[key] !== null) {
+      flattenFields(fields[key], newKey, result);
+    } else {
+      result.push({ key: newKey, value: fields[key] });
+    }
+  }
+  return result;
+}
+
+export function calculateRelevance(query, target) {
+  query = query.toLowerCase().trim();
+  target = target.toLowerCase().trim();
+  const substringScore = target.includes(query) ? 1 : 0;
+  const queryTokens = normalizeTokens(query);
+  const targetTokens = normalizeTokens(target);
+  const matchedTokens = queryTokens.filter(token => targetTokens.includes(token));
+  const tokenScore = queryTokens.length ? matchedTokens.length / queryTokens.length : 0;
+  const reorderedMatch = queryTokens.every(token => targetTokens.includes(token)) ? 1 : 0;
+  const concatenatedQuery = queryTokens.join('');
+  const concatenatedTarget = targetTokens.join('');
+  const concatenatedMatch = concatenatedTarget.includes(concatenatedQuery) ? 1 : 0;
+  const levenshteinScore = concatenatedQuery.length
+    ? 1 - levenshteinDistance(concatenatedQuery, concatenatedTarget) / Math.max(concatenatedQuery.length, concatenatedTarget.length)
+    : 0;
+  return (2 * substringScore) + (1 * tokenScore) + (1 * reorderedMatch) + (1 * concatenatedMatch) + (0.5 * levenshteinScore);
+}
