@@ -49,7 +49,7 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, ta
         }
       });
       const fields = flattenFields(response.data.fields);
-      updateResultsContainer(resultsContainer, fields, targetElement);
+      updateResultsContainer(resultsContainer, fields, targetElement, searchInput);
       resultsSelection(resultsContainer, searchInput);
       if (callback) callback();
     } else {
@@ -57,9 +57,7 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, ta
       if (callback) callback();
     }
   });
-}
-
-export function updateApplicationResults(container, results, searchInput, targetElement) {
+}export function updateApplicationResults(container, results, searchInput, targetElement) {
   container.innerHTML = '';
   results.forEach((result, index) => {
     const resultItem = createResultItem(result.title, result.company_name);
@@ -98,35 +96,41 @@ export function updateApplicationResults(container, results, searchInput, target
   });
 }
 
-export function updateResultsContainer(container, data, targetElement) {
+
+// Remove the event listener attachment from here and attach it only once.
+export function updateResultsContainer(container, data, targetElement, searchInput) {
   container.innerHTML = '';
-  // Assume the search input is the previous sibling.
-  const searchInput = container.previousElementSibling;
-  searchInput.addEventListener('input', function () {
-    const query = searchInput.value.toLowerCase().trim();
-    // Use the selected search context if available; otherwise, use the full data.
-    const dataToSearch = targetElement.searchContextData
-      ? flattenFields(targetElement.searchContextData)
-      : data;
-    if (!query) {
-      // If the search input is empty, display all fields.
-      updateDataResults(container, dataToSearch, targetElement);
+  // Attach the input listener only once.
+  if (!searchInput._dataSearchAttached) {
+    searchInput.addEventListener('input', function () {
+      const query = searchInput.value.toLowerCase().trim();
+      // If a specific search context is selected, use that; otherwise, use full data.
+      const dataToSearch = targetElement.searchContextData
+        ? flattenFields(targetElement.searchContextData)
+        : data;
+      if (!query) {
+        // If empty, show full results.
+        updateDataResults(container, dataToSearch, targetElement);
+      } else {
+        const normalizedQuery = normalizeString(query);
+        const rankedResults = dataToSearch
+          .map(item => ({
+            item,
+            relevance: calculateRelevance(normalizedQuery, normalizeString(item.key))
+          }))
+          .filter(result => result.relevance > 0.3)
+          .sort((a, b) => b.relevance - a.relevance);
+        const filteredResults = rankedResults.map(r => r.item);
+        updateDataResults(container, filteredResults, targetElement);
+      }
+      // Also update the selection (if needed)
       resultsSelection(container, searchInput);
-      return;
-    }
-    const normalizedQuery = normalizeString(query);
-    const rankedResults = dataToSearch
-      .map(item => ({
-        item,
-        relevance: calculateRelevance(normalizedQuery, normalizeString(item.key))
-      }))
-      .filter(result => result.relevance > 0.3)
-      .sort((a, b) => b.relevance - a.relevance);
-    const filteredResults = rankedResults.map(r => r.item);
-    updateDataResults(container, filteredResults, targetElement);
-    resultsSelection(container, searchInput);
-  });
-}// Helper function to show a toast message.
+    });
+    searchInput._dataSearchAttached = true;
+  }
+  // Initially display all results.
+  updateDataResults(container, data, targetElement);
+}
 function showToast(message, duration = 3000) {
   const toast = document.createElement('div');
   toast.className = 'toast-message';

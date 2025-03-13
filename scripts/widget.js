@@ -1,52 +1,180 @@
-// Static imports at the top.
 import { isInputOrTextarea } from './utils.js';
 import { setupApplicationSearch, setupDataSearch, flattenFields, updateDataResults, resultsSelection } from './searchHandler.js';
 
 export class ApplicationWidget {
   constructor(targetElement) {
     this.targetElement = targetElement;
+    this.host = null;       // Host element for shadow DOM.
     this.widget = null;
-    this.container = null; // Flex container for sidebar and main content
+    this.container = null;  // Flex container for sidebar and main content.
     this.sidebar = null;
     this.mainContent = null;
     this.header = null;
     this.searchInput = null;
     this.resultsContainer = null;
     this.backButton = null;
-    // New properties for search context:
+    // For search context:
     this.selectedTreeNodeData = null;
     this.selectedTreeNodeElement = null;
-    // Used to delay sidebar restoration
+    // Used to delay sidebar restoration.
     this.expandTimeout = null;
-    // Flag for delayed restore after minimizing whole widget.
-    this.canRestore = true;
+    // Reference to our global click handler.
+    this._globalClickHandler = null;
   }
 
   createWidget() {
+    // Create a host element for the shadow DOM and mark it.
+    const host = document.createElement('div');
+    host.setAttribute('data-widget-host', 'true');
+    this.host = host;
+    // Attach an open shadow root.
+    const shadow = host.attachShadow({ mode: 'open' });
+
+    // Create a style element with the widget's CSS.
+    const style = document.createElement('style');
+    style.textContent = `
+      /* Overall widget container */
+      .grantzy-widget {
+          position: absolute;
+          background-color: #fff;
+          padding: 15px;
+          z-index: 2000;
+          overflow: hidden;
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+          border-radius: 10px;
+          display: flex;
+          font-family: 'Helvetica Neue', Arial, sans-serif;
+          transition: transform 0.3s ease, opacity 0.3s ease;
+      }
+      
+      /* Flex container for sidebar and main content */
+      .grantzy-widget .widget-container {
+          display: flex;
+          width: 100%;
+      }
+      
+      /* Sidebar styles */
+      .grantzy-widget .widget-sidebar {
+          width: 300px;
+          border-right: 1px solid #ddd;
+          padding: 10px;
+          margin-right: 10px;
+          max-height: 400px;
+          overflow-y: auto;
+          background-color: #fafafa;
+      }
+      
+      /* Sidebar header */
+      .grantzy-widget .widget-sidebar h3 {
+          margin-top: 0;
+          font-size: 1.2em;
+          border-bottom: 1px solid #eee;
+          padding-bottom: 5px;
+      }
+      
+      /* Main content area */
+      .grantzy-widget .widget-main {
+          flex: 1;
+          padding: 10px;
+      }
+      
+      /* Widget header */
+      .grantzy-widget .widget-header {
+          font-size: 1.1em;
+          font-weight: bold;
+          margin-bottom: 10px;
+      }
+      
+      /* Search input styling */
+      .grantzy-widget input[type="text"] {
+          width: 100%;
+          padding: 8px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          margin-bottom: 10px;
+      }
+      
+      /* Results container styling */
+      .grantzy-widget .results-container {
+          max-height: 300px;
+          overflow-y: auto;
+      }
+      
+      .grantzy-widget .result-item {
+          cursor: pointer;
+          border-radius: 5px;
+          padding: 10px;
+          max-width: 400px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+      }
+      
+      .grantzy-widget .result-item:hover,
+      .grantzy-widget .result-item.hovered {
+          background-color: #f0f8ff;
+          border-color: #add8e6;
+      }
+      
+      /* Loader style */
+      .grantzy-widget .loader {
+          font-style: italic;
+          color: #777;
+      }
+      
+      /* Button styling */
+      .grantzy-widget button {
+          background-color: #007bff;
+          color: #fff;
+          border: none;
+          padding: 8px 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: background-color 0.2s ease;
+      }
+      
+      .grantzy-widget button:hover {
+          background-color: #0056b3;
+      }
+      
+      /* Controls container */
+      .grantzy-widget .widget-controls {
+          position: absolute;
+          top: 5px;
+          right: 5px;
+      }
+    `;
+    shadow.appendChild(style);
+
+    // Create the widget container element.
     const widget = document.createElement('div');
     widget.classList.add('grantzy-widget');
     widget.style.position = 'fixed';
-    widget.style.visibility = 'hidden'; // Hide initially while positioning
-    document.body.appendChild(widget);
+    widget.style.visibility = 'hidden';
+    shadow.appendChild(widget);
+
+    // Append the host element to the document.
+    document.body.appendChild(host);
+
+    // Save reference to the widget and position it.
     this.widget = widget;
     this.positionWidget();
 
-    // Create control buttons (Close and Minimize).
+    // Create control buttons (an X button for removal).
     this.createControlButtons();
 
-    // Create a container to hold the sidebar and main content.
+    // Create container for sidebar and main content.
     const container = document.createElement('div');
     container.classList.add('widget-container');
     widget.appendChild(container);
     this.container = container;
 
-    // Add delayed mouseover and mouseout events for expanding the sidebar.
+    // Set up mouse events for expanding the sidebar.
     widget.addEventListener('mouseover', () => {
       clearTimeout(this.expandTimeout);
       this.expandTimeout = setTimeout(() => {
-        this.restoreWholeWidget();
         this.expandSidebar();
-      }, 500); // 500ms delay before expanding the sidebar
+      }, 500);
     });
     widget.addEventListener('mouseout', () => {
       clearTimeout(this.expandTimeout);
@@ -56,68 +184,42 @@ export class ApplicationWidget {
     const observer = new MutationObserver(() => this.positionWidget());
     observer.observe(widget, { childList: true, subtree: true });
 
-    // Render and then show the widget.
+    // Show widget.
     requestAnimationFrame(() => {
       this.positionWidget();
       widget.style.visibility = 'visible';
     });
+
+    // Attach the global click-outside listener.
+    this.attachClickOutsideListener();
+
     return widget;
   }
 
-  // Always position the widget at the top right of the screen.
   positionWidget() {
     if (!this.widget) return;
-    const spacing = 20; // Margin from the top and right edges.
+    const spacing = 20;
     this.widget.style.top = `${spacing}px`;
     this.widget.style.right = `${spacing}px`;
-    this.widget.style.left = 'auto'; // Clear left positioning.
+    this.widget.style.left = 'auto';
   }
 
-  // Create control buttons: one for minimizing the entire widget and one for closing it.
   createControlButtons() {
     const controls = document.createElement('div');
     controls.classList.add('widget-controls');
-    controls.style.position = 'absolute';
-    controls.style.top = '5px';
-    controls.style.right = '5px';
 
-    const minimizeBtn = document.createElement('button');
-    minimizeBtn.classList.add('widget-minimize-btn');
-    minimizeBtn.textContent = '–';
-    minimizeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.minimizeWholeWidget();
-    });
-
+    // Create an X button that completely removes the widget.
     const closeBtn = document.createElement('button');
     closeBtn.classList.add('widget-close-btn');
     closeBtn.textContent = '×';
     closeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
       e.stopPropagation();
       this.destroy();
     });
 
-    controls.appendChild(minimizeBtn);
     controls.appendChild(closeBtn);
     this.widget.appendChild(controls);
-  }
-
-  // Minimizes the entire widget by adding a "minimized" class and delays restoration.
-  minimizeWholeWidget() {
-    if (this.widget && !this.widget.classList.contains('minimized')) {
-      this.widget.classList.add('minimized');
-      this.canRestore = false;
-      setTimeout(() => {
-        this.canRestore = true;
-      }, 2000); // 2-second delay before it can be restored on hover
-    }
-  }
-
-  // Restores the entire widget by removing the "minimized" class if allowed.
-  restoreWholeWidget() {
-    if (this.widget && this.widget.classList.contains('minimized') && this.canRestore) {
-      this.widget.classList.remove('minimized');
-    }
   }
 
   createMainContentContainer() {
@@ -128,7 +230,6 @@ export class ApplicationWidget {
     return mainContent;
   }
 
-  // Updated renderTree method remains similar.
   renderTree(data) {
     const ul = document.createElement('ul');
     if (Array.isArray(data)) {
@@ -203,7 +304,6 @@ export class ApplicationWidget {
     return ul;
   }
 
-  // Sets the selected node and triggers a search.
   setSelectedTreeNode(data, liElement) {
     this.selectedTreeNodeData = data;
     if (this.selectedTreeNodeElement && this.selectedTreeNodeElement !== liElement) {
@@ -215,7 +315,6 @@ export class ApplicationWidget {
     this.triggerSearchForSelectedNode();
   }
 
-  // Clears the selected node.
   clearSelectedTreeNode() {
     if (this.selectedTreeNodeElement) {
       this.selectedTreeNodeElement.classList.remove('selected');
@@ -225,7 +324,6 @@ export class ApplicationWidget {
     this.targetElement.searchContextData = null;
   }
 
-  // Triggers a search displaying all sub-fields of the selected node.
   triggerSearchForSelectedNode() {
     if (!this.selectedTreeNodeData) return;
     const flattened = flattenFields(this.selectedTreeNodeData);
@@ -293,28 +391,26 @@ export class ApplicationWidget {
     return loader;
   }
 
-  // Instead of minimizing the whole widget when clicking outside,
-  // collapse just the sidebar.
+  // Global click-outside listener: collapse sidebar if click occurs outside our host.
   attachClickOutsideListener() {
-    const handleClickOutside = (event) => {
-      if (!this.widget.contains(event.target)) {
-        this.collapseSidebar();
+    this._globalClickHandler = (event) => {
+      if (event.target.closest('[data-widget-host]')) {
+        return;
       }
+      this.collapseSidebar();
     };
-    document.addEventListener('click', handleClickOutside);
+    document.addEventListener('click', this._globalClickHandler);
   }
 
-  // Collapses (hides) the sidebar.
   collapseSidebar() {
     if (this.sidebar) {
       this.sidebar.style.display = 'none';
     }
   }
 
-  // Expands (shows) the sidebar.
   expandSidebar() {
     if (this.sidebar) {
-      this.sidebar.style.display = ''; // Reset to default display.
+      this.sidebar.style.display = '';
     }
   }
 
@@ -327,7 +423,6 @@ export class ApplicationWidget {
     });
   }
 
-  // Updates the sidebar using lazy tree built from "selectedApplicationData".
   updateSidebar(selectedApplication) {
     if (selectedApplication) {
       if (!this.sidebar) {
@@ -335,7 +430,6 @@ export class ApplicationWidget {
         this.sidebar.classList.add('widget-sidebar');
         this.container.insertBefore(this.sidebar, this.mainContent);
       }
-      // Clear existing content.
       this.sidebar.innerHTML = '';
       chrome.storage.local.get('selectedApplicationData', (data) => {
         if (data.selectedApplicationData &&
@@ -362,7 +456,6 @@ export class ApplicationWidget {
   }
 
   show() {
-    if (document.querySelector('.grantzy-widget')) return;
     if (!this.targetElement) return;
     if (!isInputOrTextarea(this.targetElement) && document.activeElement !== this.targetElement) {
       return;
@@ -386,12 +479,17 @@ export class ApplicationWidget {
       }
       this.searchInput.focus();
     });
-    this.attachClickOutsideListener();
   }
 
   destroy() {
-    if (this.widget) {
-      this.widget.remove();
+    if (this._globalClickHandler) {
+      document.removeEventListener('click', this._globalClickHandler);
+      this._globalClickHandler = null;
+    }
+    if (this.host) {
+      this.host.remove();
+      this.host = null;
+      this.widget = null;
     }
   }
 }

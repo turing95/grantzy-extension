@@ -13,13 +13,13 @@
 }
 
 /* Flex container for sidebar and main content */
-.widget-container {
+.grantzy-widget .widget-container {
     display: flex;
     width: 100%;
 }
 
 /* Sidebar styles */
-.widget-sidebar {
+.grantzy-widget .widget-sidebar {
     width: 300px;
     border-right: 1px solid #ddd;
     padding: 10px;
@@ -30,7 +30,7 @@
 }
 
 /* Sidebar header */
-.widget-sidebar h3 {
+.grantzy-widget .widget-sidebar h3 {
     margin-top: 0;
     font-size: 1.2em;
     border-bottom: 1px solid #eee;
@@ -38,20 +38,20 @@
 }
 
 /* Main content area */
-.widget-main {
+.grantzy-widget .widget-main {
     flex: 1;
     padding: 10px;
 }
 
 /* Widget header */
-.widget-header {
+.grantzy-widget .widget-header {
     font-size: 1.1em;
     font-weight: bold;
     margin-bottom: 10px;
 }
 
 /* Search input styling */
-input[type="text"] {
+.grantzy-widget input[type="text"] {
     width: 100%;
     padding: 8px;
     border: 1px solid #ccc;
@@ -60,33 +60,36 @@ input[type="text"] {
 }
 
 /* Results container styling */
-.results-container {
+.grantzy-widget .results-container {
     max-height: 300px;
     overflow-y: auto;
 }
 
 /* Loader style */
-.loader {
+.grantzy-widget .loader {
     font-style: italic;
     color: #777;
 }
+
 .grantzy-widget.minimized {
-  width: 250px;
-  height: 40px;
-  overflow: hidden;
-  transition: width 0.3s ease, height 0.3s ease;
-  cursor: pointer;
+    width: 250px;
+    height: 40px;
+    overflow: hidden;
+    transition: width 0.3s ease, height 0.3s ease;
+    cursor: pointer;
 }
 
-.widget-controls button {
-  background: none;
-  border: none;
-  font-size: 1.2em;
-  cursor: pointer;
-  margin-left: 5px;
+/* Widget controls buttons */
+.grantzy-widget .widget-controls button {
+    background: none;
+    border: none;
+    font-size: 1.2em;
+    cursor: pointer;
+    margin-left: 5px;
 }
+
 /* Result items styling */
-.result-item {
+.grantzy-widget .result-item {
     cursor: pointer;
     border-radius: 5px;
     padding: 10px;
@@ -96,14 +99,14 @@ input[type="text"] {
     text-overflow: ellipsis; /* Show ellipsis (...) for overflow */
 }
 
-.result-item:hover,
-.result-item.hovered {
+.grantzy-widget .result-item:hover,
+.grantzy-widget .result-item.hovered {
     background-color: #f0f8ff;
     border-color: #add8e6;
 }
 
 /* Logo styling */
-.grantzy-widget-logo {
+.grantzy-widget .grantzy-widget-logo {
     max-width: 50px;
     height: auto;
     display: block;
@@ -111,7 +114,7 @@ input[type="text"] {
 }
 
 /* Button styling */
-button {
+.grantzy-widget button {
     background-color: #007bff;
     color: #fff;
     border: none;
@@ -121,6 +124,6 @@ button {
     transition: background-color 0.2s ease;
 }
 
-button:hover {
+.grantzy-widget button:hover {
     background-color: #0056b3;
 }
