@@ -135,16 +135,18 @@ function showToast(message, duration = 3000) {
   const toast = document.createElement('div');
   toast.className = 'toast-message';
   toast.textContent = message;
-  // Basic inline styles (you can move these to your CSS if desired)
+  // Updated inline styles for top center positioning
   toast.style.position = 'fixed';
-  toast.style.bottom = '20px';
-  toast.style.right = '20px';
+  toast.style.top = '20px';
+  toast.style.left = '50%';
+  toast.style.transform = 'translateX(-50%)';
   toast.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
   toast.style.color = '#fff';
   toast.style.padding = '10px 20px';
   toast.style.borderRadius = '5px';
-  toast.style.zIndex = '1100';
+  toast.style.zIndex = '3100';
   toast.style.opacity = '1';
+
   document.body.appendChild(toast);
   setTimeout(() => {
     toast.style.transition = 'opacity 0.5s ease';
@@ -154,7 +156,6 @@ function showToast(message, duration = 3000) {
     }, 500);
   }, duration);
 }
-
 export function updateDataResults(container, results, targetElement) {
   container.innerHTML = '';
   results.forEach((result, index) => {
