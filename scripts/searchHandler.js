@@ -206,16 +206,26 @@ export function updateDataResults(container, results, targetElement) {
 }
 
 export function createResultItem(key, value) {
+  // Remove "root." from the beginning of the key, if present
+  const displayKey = key.startsWith('root.') ? key.substring(5) : key;
+
   const resultItem = document.createElement('div');
   resultItem.classList.add('result-item');
-  const keySpan = document.createElement('span');
-  keySpan.textContent = key;
-  resultItem.appendChild(keySpan);
+
+  // Create a container for the key.
+  const keyDiv = document.createElement('div');
+  keyDiv.classList.add('result-key');
+  keyDiv.textContent = displayKey;
+  // Show full key on hover using a tooltip
+  keyDiv.title = displayKey;
+  resultItem.appendChild(keyDiv);
+
   if (value) {
-    const valueSpan = document.createElement('span');
-    valueSpan.textContent = value.length > 20 ? value.substring(0, 20) + '...' : value;
-    valueSpan.style.float = 'right';
-    resultItem.appendChild(valueSpan);
+    // Create a container for the value on a new line.
+    const valueDiv = document.createElement('div');
+    valueDiv.classList.add('result-value');
+    valueDiv.textContent = value;
+    resultItem.appendChild(valueDiv);
   }
   return resultItem;
 }

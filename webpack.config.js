@@ -9,8 +9,15 @@ module.exports = {
     publicPath: '',
   },
   optimization: {
-    // Disable code splitting
     splitChunks: false,
     runtimeChunk: false,
+  },
+  module: {
+    rules: [
+      {
+        test: /\.css$/,
+        type: 'asset/source'
+      }
+    ]
   },
 };
