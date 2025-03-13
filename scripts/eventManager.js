@@ -1,12 +1,28 @@
 import { ApplicationWidget } from './widget.js';
 import { isInputOrTextarea } from './utils.js';
 
+// eventManager.js
 export function handleGlobalKeyUp(event) {
+  // Check for Shift+Y combination
+  if (event.shiftKey && event.key.toLowerCase() === 'y') {
+    // Only open the widget if one isn’t already open.
+    if (!document.querySelector('[data-widget-host]')) {
+      // Use the active element as the target for the widget
+      const widget = new ApplicationWidget(document.activeElement);
+      // Optionally, attach the widget instance to the active element
+      document.activeElement._widgetInstance = widget;
+      widget.show();
+    }
+  }
+
+  // Existing logic for inputs or textareas ending with '//'
   const element = event.target;
   if (isInputOrTextarea(element) && element.value && element.value.endsWith('//')) {
-    // Create and show the widget for this element.
-    const widget = new ApplicationWidget(element);
-    widget.show();
+    if (!element._widgetInstance) {
+      const widget = new ApplicationWidget(element);
+      element._widgetInstance = widget;
+      widget.show();
+    }
   }
 }
 

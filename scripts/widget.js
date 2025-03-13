@@ -335,9 +335,11 @@ export class ApplicationWidget {
 
     attachStorageChangeListener() {
         chrome.storage.onChanged.addListener((changes, namespace) => {
-            if (namespace === 'local' && changes.selectedApplication) {
-                const newValue = changes.selectedApplication.newValue;
-                this.updateSidebar(newValue);
+            if (namespace === 'local' && (changes.selectedApplication || changes.selectedApplicationData)) {
+                // Ensure we fetch the latest selectedApplication value
+                chrome.storage.local.get('selectedApplication', (data) => {
+                    this.updateSidebar(data.selectedApplication);
+                });
             }
         });
     }
@@ -400,6 +402,7 @@ export class ApplicationWidget {
         });
     }
 
+    // widget.js inside ApplicationWidget class
     destroy() {
         if (this._globalClickHandler) {
             document.removeEventListener('click', this._globalClickHandler);
@@ -409,6 +412,10 @@ export class ApplicationWidget {
             this.host.remove();
             this.host = null;
             this.widget = null;
+        }
+        // Remove the widget instance from the target element.
+        if (this.targetElement) {
+            delete this.targetElement._widgetInstance;
         }
     }
 }
