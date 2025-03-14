@@ -43,6 +43,7 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, ta
       console.error("Message Error:", chrome.runtime.lastError);
       if (callback) callback();
     } else if (response.success) {
+      console.log("Application data fetched:", response.data);
       chrome.storage.local.set({
         selectedApplicationData: {
           fields: response.data.fields
@@ -270,13 +271,30 @@ export function setHoveredResult(item, container) {
 }
 
 export function flattenFields(fields, parentKey = '', result = []) {
-  for (const key in fields) {
-    const newKey = parentKey ? `${parentKey}.${key}` : key;
-    if (typeof fields[key] === 'object' && fields[key] !== null) {
+  if (Array.isArray(fields)) {
+    fields.forEach(item => {
+      // Build the full key path by appending the current key
+      const newKey = parentKey ? `${parentKey}.${item.key}` : item.key;
+      if (Array.isArray(item.value)) {
+        // If the value is an array, recurse to flatten its items.
+        flattenFields(item.value, newKey, result);
+      } else if (item.value !== null && typeof item.value === 'object') {
+        // If the value is a plain object, convert it to an array of key/value pairs and then flatten.
+        const nestedFields = Object.keys(item.value).map(key => ({ key, value: item.value[key] }));
+        flattenFields(nestedFields, newKey, result);
+      } else {
+        // Otherwise, push the current key/value pair.
+        result.push({ key: newKey, value: item.value });
+      }
+    });
+  } else if (fields && typeof fields === 'object') {
+    // Fallback in case fields is a plain object.
+    Object.keys(fields).forEach(key => {
+      const newKey = parentKey ? `${parentKey}.${key}` : key;
       flattenFields(fields[key], newKey, result);
-    } else {
-      result.push({ key: newKey, value: fields[key] });
-    }
+    });
+  } else {
+    result.push({ key: parentKey, value: fields });
   }
   return result;
 }

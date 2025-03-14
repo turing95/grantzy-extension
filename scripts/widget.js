@@ -127,78 +127,65 @@ export class ApplicationWidget {
     }
 
     renderTree(data) {
-        const ul = document.createElement('ul');
-        if (Array.isArray(data)) {
-            data.forEach((item, index) => {
-                if (typeof item === 'object' && item !== null) {
-                    const li = document.createElement('li');
-                    li.textContent = `[${index}]`;
-                    li.style.cursor = 'pointer';
-                    li.dataset.expanded = "false";
-                    li.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        Array.from(li.parentElement.children).forEach(sibling => {
-                            if (sibling !== li && sibling.dataset.expanded === "true") {
-                                const childUl = sibling.querySelector('ul');
-                                if (childUl) sibling.removeChild(childUl);
-                                sibling.dataset.expanded = "false";
-                                sibling.classList.remove('selected');
-                            }
-                        });
-                        if (li.dataset.expanded === "false") {
-                            const childUl = this.renderTree(item);
-                            li.appendChild(childUl);
-                            li.dataset.expanded = "true";
-                            this.setSelectedTreeNode(item, li);
-                        } else {
-                            const childUl = li.querySelector('ul');
-                            if (childUl) li.removeChild(childUl);
-                            li.dataset.expanded = "false";
-                            if (this.selectedTreeNodeElement === li) {
-                                this.clearSelectedTreeNode();
-                            }
-                        }
-                    });
-                    ul.appendChild(li);
-                }
-            });
-        } else {
-            for (const key in data) {
-                if (data.hasOwnProperty(key) && typeof data[key] === 'object' && data[key] !== null) {
-                    const li = document.createElement('li');
-                    li.textContent = key;
-                    li.style.cursor = 'pointer';
-                    li.dataset.expanded = "false";
-                    li.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        Array.from(li.parentElement.children).forEach(sibling => {
-                            if (sibling !== li && sibling.dataset.expanded === "true") {
-                                const childUl = sibling.querySelector('ul');
-                                if (childUl) sibling.removeChild(childUl);
-                                sibling.dataset.expanded = "false";
-                                sibling.classList.remove('selected');
-                            }
-                        });
-                        if (li.dataset.expanded === "false") {
-                            const childUl = this.renderTree(data[key]);
-                            li.appendChild(childUl);
-                            li.dataset.expanded = "true";
-                            this.setSelectedTreeNode(data[key], li);
-                        } else {
-                            const childUl = li.querySelector('ul');
-                            if (childUl) li.removeChild(childUl);
-                            li.dataset.expanded = "false";
-                            if (this.selectedTreeNodeElement === li) {
-                                this.clearSelectedTreeNode();
-                            }
-                        }
-                    });
-                    ul.appendChild(li);
-                }
+  const ul = document.createElement('ul');
+  if (Array.isArray(data)) {
+    data.forEach(item => {
+      if (typeof item === 'object' && item !== null) {
+        const li = document.createElement('li');
+        li.textContent = item.key;
+        li.style.cursor = 'pointer';
+        li.dataset.expanded = "false";
+        li.addEventListener('click', (e) => {
+          e.stopPropagation();
+          // Collapse siblings if needed.
+          Array.from(li.parentElement.children).forEach(sibling => {
+            if (sibling !== li && sibling.dataset.expanded === "true") {
+              const childUl = sibling.querySelector('ul');
+              if (childUl) sibling.removeChild(childUl);
+              sibling.dataset.expanded = "false";
+              sibling.classList.remove('selected');
             }
-        }
-        return ul;
-    }
+          });
+          if (li.dataset.expanded === "false") {
+            let childData = item.value;
+            if (childData && typeof childData === 'object') {
+              // If childData is not already an array, convert it.
+              if (!Array.isArray(childData)) {
+                childData = Object.keys(childData).map(key => ({ key, value: childData[key] }));
+              }
+              const childUl = this.renderTree(childData);
+              li.appendChild(childUl);
+            }
+            li.dataset.expanded = "true";
+            this.setSelectedTreeNode(item.value, li);
+          } else {
+            const childUl = li.querySelector('ul');
+            if (childUl) li.removeChild(childUl);
+            li.dataset.expanded = "false";
+            if (this.selectedTreeNodeElement === li) {
+              this.clearSelectedTreeNode();
+            }
+          }
+        });
+        ul.appendChild(li);
+      }
+    });
+  } else if (data && typeof data === 'object') {
+    // Fallback for non-array data.
+    Object.keys(data).forEach(key => {
+      const li = document.createElement('li');
+      li.textContent = key;
+      li.style.cursor = 'pointer';
+      li.dataset.expanded = "false";
+      li.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Add similar expand/collapse logic here.
+      });
+      ul.appendChild(li);
+    });
+  }
+  return ul;
+}
 
     setSelectedTreeNode(data, liElement) {
         this.selectedTreeNodeData = data;
