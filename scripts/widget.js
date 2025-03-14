@@ -130,56 +130,73 @@ export class ApplicationWidget {
   const ul = document.createElement('ul');
   if (Array.isArray(data)) {
     data.forEach(item => {
-      if (typeof item === 'object' && item !== null) {
-        const li = document.createElement('li');
-        li.textContent = item.key;
-        li.style.cursor = 'pointer';
-        li.dataset.expanded = "false";
-        li.addEventListener('click', (e) => {
-          e.stopPropagation();
-          // Collapse siblings if needed.
-          Array.from(li.parentElement.children).forEach(sibling => {
-            if (sibling !== li && sibling.dataset.expanded === "true") {
-              const childUl = sibling.querySelector('ul');
-              if (childUl) sibling.removeChild(childUl);
-              sibling.dataset.expanded = "false";
-              sibling.classList.remove('selected');
-            }
-          });
-          if (li.dataset.expanded === "false") {
-            let childData = item.value;
-            if (childData && typeof childData === 'object') {
-              // If childData is not already an array, convert it.
-              if (!Array.isArray(childData)) {
-                childData = Object.keys(childData).map(key => ({ key, value: childData[key] }));
-              }
-              const childUl = this.renderTree(childData);
-              li.appendChild(childUl);
-            }
-            li.dataset.expanded = "true";
-            this.setSelectedTreeNode(item.value, li);
-          } else {
-            const childUl = li.querySelector('ul');
-            if (childUl) li.removeChild(childUl);
-            li.dataset.expanded = "false";
-            if (this.selectedTreeNodeElement === li) {
-              this.clearSelectedTreeNode();
-            }
+      // Check if item.value exists and is an object with children.
+      let childData = item.value;
+      let hasChildren = false;
+      if (childData && typeof childData === 'object') {
+        if (Array.isArray(childData)) {
+          hasChildren = childData.length > 0;
+        } else {
+          hasChildren = Object.keys(childData).length > 0;
+        }
+      }
+      // Only render nodes that have children (i.e. non-leaf nodes)
+      if (!hasChildren) {
+        return; // skip this leaf node
+      }
+
+      const li = document.createElement('li');
+      li.textContent = item.key;
+      li.style.cursor = 'pointer';
+      li.dataset.expanded = "false";
+      li.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Collapse siblings if needed.
+        Array.from(li.parentElement.children).forEach(sibling => {
+          if (sibling !== li && sibling.dataset.expanded === "true") {
+            const childUl = sibling.querySelector('ul');
+            if (childUl) sibling.removeChild(childUl);
+            sibling.dataset.expanded = "false";
+            sibling.classList.remove('selected');
           }
         });
-        ul.appendChild(li);
-      }
+        if (li.dataset.expanded === "false") {
+          // Only render children if they exist (we already checked above)
+          if (childData && typeof childData === 'object') {
+            // If childData is not already an array, convert it.
+            if (!Array.isArray(childData)) {
+              childData = Object.keys(childData).map(key => ({ key, value: childData[key] }));
+            }
+            const childUl = this.renderTree(childData);
+            li.appendChild(childUl);
+          }
+          li.dataset.expanded = "true";
+          this.setSelectedTreeNode(item.value, li);
+        } else {
+          const childUl = li.querySelector('ul');
+          if (childUl) li.removeChild(childUl);
+          li.dataset.expanded = "false";
+          if (this.selectedTreeNodeElement === li) {
+            this.clearSelectedTreeNode();
+          }
+        }
+      });
+      ul.appendChild(li);
     });
   } else if (data && typeof data === 'object') {
-    // Fallback for non-array data.
+    // Fallback for non-array data: render only keys that are objects with children.
     Object.keys(data).forEach(key => {
+      let value = data[key];
+      if (!value || typeof value !== 'object' || Object.keys(value).length === 0) {
+        return; // skip leaf nodes
+      }
       const li = document.createElement('li');
       li.textContent = key;
       li.style.cursor = 'pointer';
       li.dataset.expanded = "false";
       li.addEventListener('click', (e) => {
         e.stopPropagation();
-        // Add similar expand/collapse logic here.
+        // Similar expand/collapse logic can be added here if needed.
       });
       ul.appendChild(li);
     });
