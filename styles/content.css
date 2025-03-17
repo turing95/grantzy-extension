@@ -45,6 +45,7 @@
 .grantzy-widget .widget-main {
     flex: 1;
     padding: 10px;
+    max-width:500px;
 }
 
 /* Widget header */
@@ -73,7 +74,6 @@
     cursor: pointer;
     border-radius: 5px;
     padding: 10px;
-    max-width: 500px;
     overflow: hidden;
     text-overflow: ellipsis;
 }
