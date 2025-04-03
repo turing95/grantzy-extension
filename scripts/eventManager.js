@@ -2,9 +2,9 @@ import { ApplicationWidget } from './widget.js';
 import { isInputOrTextarea } from './utils.js';
 
 // eventManager.js
-export function handleGlobalKeyUp(event) {
-  // Check for Shift+Y combination
-  if (event.shiftKey && event.key.toLowerCase() === 'y') {
+export function handleGlobalKeyDown(event ){
+  // Check for Alt+Q combination
+  if (event.altKey && event.code === 'KeyQ') {
     // Only open the widget if one isn’t already open.
     if (!document.querySelector('[data-widget-host]')) {
       // Use the active element as the target for the widget
@@ -28,7 +28,7 @@ export function handleGlobalKeyUp(event) {
 
 function addKeyUpListener(element) {
   if (!element._hasKeyUpListener) {
-    element.addEventListener('keyup', handleGlobalKeyUp);
+    element.addEventListener('keydown', handleGlobalKeyDown);
     element._hasKeyUpListener = true; // Mark to prevent duplicate listeners.
   }
 }
@@ -42,6 +42,6 @@ export function attachListenersToAllElements(element) {
 
 export function initEventListeners() {
   // Attach keyup listener on document.
-  document.addEventListener('keyup', handleGlobalKeyUp);
+  document.addEventListener('keyup', handleGlobalKeyDown);
 
 }

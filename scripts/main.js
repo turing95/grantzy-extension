@@ -1,6 +1,6 @@
-import { attachListenersToAllElements,handleGlobalKeyUp } from './eventManager.js';
+import { attachListenersToAllElements,handleGlobalKeyDown } from './eventManager.js';
 
-document.addEventListener('keyup', handleGlobalKeyUp);
+document.addEventListener('keyup', handleGlobalKeyDown);
 
 const observer = new MutationObserver(mutations => {
     mutations.forEach(mutation => {
