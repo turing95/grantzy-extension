@@ -24,10 +24,19 @@ export function setupApplicationSearch(searchInput, resultsContainer, targetElem
         const query = searchInput.value.toLowerCase().trim();
         const normalizedQuery = normalizeString(query);
         const rankedResults = applications
-            .map(application => ({
-                application,
-                relevance: calculateRelevance(normalizedQuery, normalizeString(application.title))
-            }))
+            .map(application => {
+                // Calculate relevance for both title and company_name
+                const titleRelevance = calculateRelevance(normalizedQuery, normalizeString(application.title));
+                const companyRelevance = calculateRelevance(normalizedQuery, normalizeString(application.company_name));
+
+                // Use the higher of the two relevance scores
+                const relevance = Math.max(titleRelevance, companyRelevance);
+
+                return {
+                    application,
+                    relevance
+                };
+            })
             .filter(result => result.relevance > 0.3)
             .sort((a, b) => b.relevance - a.relevance);
         const filteredResults = rankedResults.map(r => r.application);
@@ -41,40 +50,41 @@ export function setupApplicationSearch(searchInput, resultsContainer, targetElem
 }
 
 export function setupDataSearch(searchInput, resultsContainer, applicationId, targetElement, callback) {
-  // Remove the application search listener if it exists.
-  if (searchInput._applicationSearchListener) {
-    searchInput.removeEventListener('input', searchInput._applicationSearchListener);
-    delete searchInput._applicationSearchListener;
-  }
-
-  // Optionally, reset the flag to allow attaching a new data search listener.
-  searchInput._dataSearchAttached = false;
-
-  // Clear previous search context to ensure data search uses fresh fields.
-  targetElement.searchContextData = null;
-
-  searchInput.placeholder = 'Search data...';
-  chrome.runtime.sendMessage({ action: "fetchApplicationData", applicationId: applicationId }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.error("Message Error:", chrome.runtime.lastError);
-      if (callback) callback();
-    } else if (response.success) {
-      console.log("Application data fetched:", response.data);
-      chrome.storage.local.set({
-        selectedApplicationData: {
-          fields: response.data.fields
-        }
-      });
-      const fields = flattenFields(response.data.fields);
-      updateResultsContainer(resultsContainer, fields, targetElement, searchInput);
-      resultsSelection(resultsContainer, searchInput);
-      if (callback) callback();
-    } else {
-      console.error("Error fetching application data:", response.error);
-      if (callback) callback();
+    // Remove the application search listener if it exists.
+    if (searchInput._applicationSearchListener) {
+        searchInput.removeEventListener('input', searchInput._applicationSearchListener);
+        delete searchInput._applicationSearchListener;
     }
-  });
+
+    // Optionally, reset the flag to allow attaching a new data search listener.
+    searchInput._dataSearchAttached = false;
+
+    // Clear previous search context to ensure data search uses fresh fields.
+    targetElement.searchContextData = null;
+
+    searchInput.placeholder = 'Search data...';
+    chrome.runtime.sendMessage({action: "fetchApplicationData", applicationId: applicationId}, (response) => {
+        if (chrome.runtime.lastError) {
+            console.error("Message Error:", chrome.runtime.lastError);
+            if (callback) callback();
+        } else if (response.success) {
+            console.log("Application data fetched:", response.data);
+            chrome.storage.local.set({
+                selectedApplicationData: {
+                    fields: response.data.fields
+                }
+            });
+            const fields = flattenFields(response.data.fields);
+            updateResultsContainer(resultsContainer, fields, targetElement, searchInput);
+            resultsSelection(resultsContainer, searchInput);
+            if (callback) callback();
+        } else {
+            console.error("Error fetching application data:", response.error);
+            if (callback) callback();
+        }
+    });
 }
+
 export function updateApplicationResults(container, results, searchInput, targetElement) {
     container.innerHTML = '';
     results.forEach((result, index) => {
