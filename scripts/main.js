@@ -11,8 +11,6 @@ const observer = new MutationObserver(mutations => {
                     attachListenersToAllElements(node);
                 }
             });
-        } else if (mutation.type === 'characterData' && mutation.target.data.slice(-2) === '//') {
-            displayApplicationSearchWidget(mutation.target.parentElement);
         }
     });
 });
