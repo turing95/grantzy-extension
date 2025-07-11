@@ -6,4 +6,4 @@ node_modules
 .cache
 
 .idea
-scripts/env.js
+src/env.js

@@ -3,14 +3,18 @@
   "name": "Grantzy fill form",
   "version": "1.0",
   "description": "Fill forms with Grantzy data",
+  "side_panel": {
+    "default_path": "src/sidepanel.html"
+  },
   "permissions": [
-    "storage"
+    "storage",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://grantzy.com/"
   ],
   "background": {
-    "service_worker": "scripts/background.js",
+    "service_worker": "src/background.js",
     "type": "module"
   },
   "content_scripts": [

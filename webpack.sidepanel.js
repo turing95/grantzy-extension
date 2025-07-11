@@ -2,9 +2,9 @@ const path = require('path');
 
 module.exports = {
   mode: 'production', // or 'development' during development
-  entry: './src/main.js', // adjust if your entry point has a different name
+  entry: './src/sidepanel.js', // adjust if your entry point has a different name
   output: {
-    filename: 'bundle.js',
+    filename: 'sidepanel.js',
     path: path.resolve(__dirname, 'dist'),
     publicPath: '',
   },

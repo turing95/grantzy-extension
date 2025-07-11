@@ -381,13 +381,13 @@ export class ApplicationWidget {
     }
 
     show() {
-        if (!this.targetElement) return;
+        /*if (!this.targetElement) return;
         if (!isInputOrTextarea(this.targetElement) && document.activeElement !== this.targetElement) {
             return;
         }
         if (isInputOrTextarea(this.targetElement)) {
             this.targetElement.autocomplete = 'off';
-        }
+        }*/
         this.createWidget();
         this.createMainContentContainer();
         this.createHeader();

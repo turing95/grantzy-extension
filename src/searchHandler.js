@@ -68,7 +68,6 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, ta
             console.error("Message Error:", chrome.runtime.lastError);
             if (callback) callback();
         } else if (response.success) {
-            console.log("Application data fetched:", response.data);
             chrome.storage.local.set({
                 selectedApplicationData: {
                     fields: response.data.fields
@@ -138,7 +137,7 @@ export function updateResultsContainer(container, data, targetElement, searchInp
                 : data;
             if (!query) {
                 // If empty, show full results.
-                updateDataResults(container, dataToSearch, targetElement);
+                updateDataResults(container, dataToSearch);
             } else {
                 const normalizedQuery = normalizeString(query);
                 const rankedResults = dataToSearch
@@ -149,7 +148,7 @@ export function updateResultsContainer(container, data, targetElement, searchInp
                     .filter(result => result.relevance > 0.3)
                     .sort((a, b) => b.relevance - a.relevance);
                 const filteredResults = rankedResults.map(r => r.item);
-                updateDataResults(container, filteredResults, targetElement);
+                updateDataResults(container, filteredResults);
             }
             // Also update the selection (if needed)
             resultsSelection(container, searchInput);
@@ -157,7 +156,7 @@ export function updateResultsContainer(container, data, targetElement, searchInp
         searchInput._dataSearchAttached = true;
     }
     // Initially display all results.
-    updateDataResults(container, data, targetElement);
+    updateDataResults(container, data);
 }
 
 function showToast(message, duration = 3000) {
@@ -186,39 +185,14 @@ function showToast(message, duration = 3000) {
     }, duration);
 }
 
-export function updateDataResults(container, results, targetElement) {
+export function updateDataResults(container, results) {
     container.innerHTML = '';
     results.forEach((result, index) => {
         const resultItem = createResultItem(result.key, result.value);
-        /*resultItem.addEventListener('click', function () {
-          if (targetElement.value !== undefined) {
-            const value = targetElement.value;
-            const lastIndex = value.lastIndexOf('//');
-            if (lastIndex !== -1) {
-              targetElement.value = value.substring(0, lastIndex) + result.value;
-            }
-            const evnt = new InputEvent('input', {
-              bubbles: true,
-              cancelable: true,
-              inputType: 'insertFromPaste'
-            });
-            targetElement.dispatchEvent(evnt);
-          } else {
-            const textContent = targetElement.textContent;
-            const lastIndex = textContent.lastIndexOf('//');
-            if (lastIndex !== -1) {
-              targetElement.textContent = textContent.substring(0, lastIndex) + result.value;
-            }
-          }
-          // Remove the widget by removing its container.
-          container.parentElement.remove();
-        });*/
+
         resultItem.addEventListener('click', function () {
             navigator.clipboard.writeText(result.value)
                 .then(() => {
-                    console.log("Copied to clipboard: " + result.value);
-                    // Optionally, provide visual feedback or remove the widget.
-                    //container.parentElement.remove();
                     showToast("Copied to clipboard!");
 
                 })

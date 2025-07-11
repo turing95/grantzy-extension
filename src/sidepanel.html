@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Grantzy Application Sidepanel</title>
+    <!-- Core sidepanel script -->
+    <script type="module" src="../dist/sidepanel.js"></script>
+    <!-- Styles for sidebar tree -->
+    <style>
+/* Overall widget container */
+.grantzy-widget {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #fff;
+  padding: 15px;
+  z-index: 2000;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  overflow: hidden;
+}
+
+/* Grid-based inner layout */
+.grantzy-widget .widget-container {
+  display: grid;
+  grid-template-areas:
+    "header header"
+    "search search"
+    "sidebar main";
+  grid-template-columns: 300px 1fr; /* sidebar fixed, main flexible */
+  grid-template-rows: auto auto 1fr; /* header, search, content */
+  gap: 10px;
+  flex: 1;
+  overflow: hidden;
+  padding: 0 10px 10px;
+}
+
+/* Header */
+.grantzy-widget .widget-header {
+  grid-area: header;
+  font-size: 1.2em;
+  font-weight: bold;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 5px;
+  margin: 0;
+}
+
+/* Back button */
+#back-button {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+#back-button:hover {
+  background-color: #0056b3;
+}
+
+/* Search input */
+#app-search-input {
+  grid-area: search;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1em;
+}
+
+/* Sidebar */
+.grantzy-widget .widget-sidebar {
+  grid-area: sidebar;
+  border-right: 1px solid #ddd;
+  padding: 10px;
+  background-color: #fafafa;
+  overflow-y: auto;
+}
+.grantzy-widget .widget-sidebar h3 {
+  margin-top: 0;
+  font-size: 1.1em;
+}
+
+/* Sidebar selection highlight */
+.grantzy-widget .widget-sidebar li.selected-root {
+  background-color: #e0f7fa;
+}
+
+/* Main results panel */
+.grantzy-widget .widget-main {
+  grid-area: main;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+/* Result items */
+.grantzy-widget .result-item {
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+.grantzy-widget .result-item:hover,
+.grantzy-widget .result-item.hovered {
+  background-color: #f0f8ff;
+  border-color: #add8e6;
+}
+
+/* Key/value styling */
+.result-key {
+  display: block;
+  font-weight: bold;
+  font-size: 0.85em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+.result-value {
+  white-space: normal;
+}
+
+/* Loader */
+.grantzy-widget .loader {
+  font-style: italic;
+  color: #777;
+}
+
+/* Global button tweaks */
+.grantzy-widget button {
+  font-family: inherit;
+}
+    </style>
+</head>
+<body>
+<div id="grantzy-sidepanel" class="grantzy-widget">
+    <div class="widget-container">
+
+        <!-- Header -->
+        <div class="widget-header">Grantzy Applications</div>
+        <!-- Back button -->
+        <button id="back-button">← Back</button>
+        <!-- Search input -->
+        <input
+                type="text"
+                id="app-search-input"
+                placeholder="Search applications..."
+        />
+
+        <!-- Sidebar tree will be inserted here dynamically -->
+        <!-- Main results -->
+        <div id="app-search-results" class="results-container widget-main"></div>
+    </div>
+</div>
+
+
+</body>
+</html>
