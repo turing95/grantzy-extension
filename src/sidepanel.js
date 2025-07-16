@@ -143,6 +143,7 @@ function triggerSearchForSelectedNode() {
 
 function updateSidebar(selectedApplication) {
     if (selectedApplication) {
+        containerEl.classList.remove('no-sidebar');
         if (!sidebarEl) {
             sidebarEl = document.createElement('div');
             sidebarEl.classList.add('widget-sidebar');
@@ -166,6 +167,7 @@ function updateSidebar(selectedApplication) {
             sidebarEl.remove();
             sidebarEl = null;
         }
+        containerEl.classList.add('no-sidebar');
         headerEl.textContent = 'Grantzy Applications';
         backButton.style.display = 'none';
     }

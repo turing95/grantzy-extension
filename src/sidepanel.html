@@ -144,6 +144,14 @@
 .grantzy-widget button {
   font-family: inherit;
 }
+.grantzy-widget .widget-container.no-sidebar {
+  /* collapse to one column and stretch main */
+  grid-template-areas:
+    "header header"
+    "search search"
+    "main main";
+  grid-template-columns: 1fr;
+}
     </style>
 </head>
 <body>
