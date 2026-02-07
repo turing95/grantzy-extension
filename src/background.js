@@ -303,6 +303,47 @@ async function matchFormFieldsWithAiFromApi({
     );
 }
 
+async function fetchExtensionFormMappingsFromApi({
+    origin = '',
+    formFingerprint = ''
+} = {}) {
+    if (!origin || !formFingerprint) {
+        throw new Error('origin and formFingerprint are required to fetch form mappings.');
+    }
+
+    return fetchJson(
+        buildApiUrl('/api/extension/v1/form-mappings', {
+            origin: String(origin || ''),
+            form_fingerprint: String(formFingerprint || '')
+        })
+    );
+}
+
+async function saveExtensionFormMappingsToApi({
+    origin = '',
+    formFingerprint = '',
+    mappings = []
+} = {}) {
+    if (!origin || !formFingerprint) {
+        throw new Error('origin and formFingerprint are required to save form mappings.');
+    }
+
+    return fetchJson(
+        buildApiUrl('/api/extension/v1/form-mappings'),
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                origin: String(origin || ''),
+                form_fingerprint: String(formFingerprint || ''),
+                mappings: Array.isArray(mappings) ? mappings : []
+            })
+        }
+    );
+}
+
 async function fetchExtensionSessionFromApi({ forceSession = false } = {}) {
     try {
         return await fetchJson(
@@ -606,6 +647,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 success: true,
                 items: Array.isArray(data?.items) ? data.items : [],
                 meta: data?.meta || null
+            };
+        }
+
+        if (message.action === 'getExtensionFormMappings') {
+            const data = await fetchExtensionFormMappingsFromApi({
+                origin: message.origin,
+                formFingerprint: message.formFingerprint
+            });
+
+            return {
+                success: true,
+                origin: data?.origin || '',
+                formFingerprint: data?.form_fingerprint || '',
+                mappings: Array.isArray(data?.mappings) ? data.mappings : [],
+                meta: data?.meta || null
+            };
+        }
+
+        if (message.action === 'saveExtensionFormMappings') {
+            const data = await saveExtensionFormMappingsToApi({
+                origin: message.origin,
+                formFingerprint: message.formFingerprint,
+                mappings: message.mappings
+            });
+
+            return {
+                success: true,
+                savedCount: Number.parseInt(String(data?.saved_count || '0'), 10) || 0
             };
         }
 

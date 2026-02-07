@@ -14,6 +14,19 @@ function setStorageValue(key, value) {
     });
 }
 
+function sendRuntimeMessage(payload) {
+    return new Promise(resolve => {
+        chrome.runtime.sendMessage(payload, response => {
+            if (chrome.runtime.lastError) {
+                resolve({ success: false, error: chrome.runtime.lastError.message });
+                return;
+            }
+
+            resolve(response || { success: false, error: 'No response from background' });
+        });
+    });
+}
+
 async function readMemory() {
     const memory = await getStorageValue(STORAGE_KEY);
     if (!memory || typeof memory !== 'object') {
@@ -25,7 +38,41 @@ async function readMemory() {
 
 export async function loadMappingMemory(origin, formFingerprint) {
     const memory = await readMemory();
-    return memory?.[origin]?.[formFingerprint]?.mappings || {};
+    const localMappings = memory?.[origin]?.[formFingerprint]?.mappings || {};
+    if (!origin || !formFingerprint) {
+        return localMappings;
+    }
+
+    const response = await sendRuntimeMessage({
+        action: 'getExtensionFormMappings',
+        origin,
+        formFingerprint
+    });
+    if (!response?.success || !Array.isArray(response?.mappings)) {
+        return localMappings;
+    }
+
+    const serverMappings = {};
+    response.mappings.forEach(mapping => {
+        const fieldSignature = String(
+            mapping?.field_signature || mapping?.fieldSignature || ''
+        ).trim();
+        const grantzyKey = String(mapping?.grantzy_key || mapping?.grantzyKey || '').trim();
+        if (!fieldSignature || !grantzyKey) {
+            return;
+        }
+
+        serverMappings[fieldSignature] = {
+            grantzyKey,
+            dropdownOptionText: mapping?.dropdown_option_text || mapping?.dropdownOptionText || null,
+            dropdownOptionValue: mapping?.dropdown_option_value || mapping?.dropdownOptionValue || null
+        };
+    });
+
+    return {
+        ...serverMappings,
+        ...localMappings
+    };
 }
 
 function trimOriginMemory(originMemory) {
@@ -78,6 +125,24 @@ export async function saveMappingMemory(origin, formFingerprint, items, metadata
 
     memory[origin] = trimOriginMemory(existingOriginMemory);
     await setStorageValue(STORAGE_KEY, memory);
+
+    const serverMappings = Object.entries(mappings).map(([fieldSignature, mapping]) => ({
+        field_signature: fieldSignature,
+        grantzy_key: mapping.grantzyKey,
+        dropdown_option_text: mapping.dropdownOptionText || '',
+        dropdown_option_value: mapping.dropdownOptionValue || ''
+    }));
+
+    if (!serverMappings.length) {
+        return;
+    }
+
+    await sendRuntimeMessage({
+        action: 'saveExtensionFormMappings',
+        origin,
+        formFingerprint,
+        mappings: serverMappings
+    });
 }
 
 export async function listRecentMappingMemories(limit = DEFAULT_RECENT_LIMIT) {
