@@ -271,6 +271,38 @@ async function fetchApplicationDetailFromApi(applicationId) {
     }
 }
 
+async function matchFormFieldsWithAiFromApi({
+    applicationId,
+    origin = '',
+    url = '',
+    formFingerprint = '',
+    fields = [],
+    memoryHints = []
+} = {}) {
+    if (!applicationId) {
+        throw new Error('Application id is required for AI field matching.');
+    }
+
+    const payload = {
+        origin: String(origin || ''),
+        url: String(url || ''),
+        form_fingerprint: String(formFingerprint || ''),
+        fields: Array.isArray(fields) ? fields : [],
+        memory_hints: Array.isArray(memoryHints) ? memoryHints : []
+    };
+
+    return fetchJson(
+        buildApiUrl(`/api/extension/v1/spaces/${applicationId}/match-fields`),
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        }
+    );
+}
+
 async function fetchExtensionSessionFromApi({ forceSession = false } = {}) {
     try {
         return await fetchJson(
@@ -558,6 +590,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'fetchApplicationData' && message.applicationId) {
             const data = await fetchApplicationDetailFromApi(message.applicationId);
             return { success: true, data };
+        }
+
+        if (message.action === 'matchFormFieldsWithAi' && message.applicationId) {
+            const data = await matchFormFieldsWithAiFromApi({
+                applicationId: message.applicationId,
+                origin: message.origin,
+                url: message.url,
+                formFingerprint: message.formFingerprint,
+                fields: message.fields,
+                memoryHints: message.memoryHints
+            });
+
+            return {
+                success: true,
+                items: Array.isArray(data?.items) ? data.items : [],
+                meta: data?.meta || null
+            };
         }
 
         if (message.action === 'getExtensionSession') {

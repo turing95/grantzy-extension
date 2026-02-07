@@ -731,6 +731,146 @@ function getSelectableOptions(item) {
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeConfidence(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return 0;
+    }
+    return Math.max(0, Math.min(1, parsed));
+}
+
+function normalizeAiStatus(rawStatus, confidence, grantzyKey) {
+    if (!grantzyKey) {
+        return 'skipped';
+    }
+
+    if (rawStatus === 'auto' || rawStatus === 'needs_review' || rawStatus === 'skipped') {
+        if (rawStatus === 'skipped') {
+            return 'skipped';
+        }
+        return rawStatus;
+    }
+
+    if (confidence >= 0.9) {
+        return 'auto';
+    }
+    if (confidence >= 0.6) {
+        return 'needs_review';
+    }
+    return 'skipped';
+}
+
+function getFieldLabel(field, index) {
+    return field?.label || field?.name || field?.idAttr || field?.pathHint || `Field ${index + 1}`;
+}
+
+function buildMemoryHints(memory = {}) {
+    return Object.entries(memory)
+        .map(([fieldSignature, payload]) => ({
+            field_signature: fieldSignature,
+            grantzy_key: payload?.grantzyKey || ''
+        }))
+        .filter(item => item.field_signature && item.grantzy_key);
+}
+
+function buildFallbackFillPlan(memory = {}) {
+    return buildFillPlan({
+        formFields: latestScan?.fields || [],
+        grantzyFields: flatGrantzyFields,
+        memory
+    }).map(item => ({
+        ...item,
+        enabled: item.status === 'auto' || item.status === 'needs_review' || item.status === 'manual'
+    }));
+}
+
+function buildAiFillPlan(aiItems = [], formFields = []) {
+    const matchByFieldId = new Map();
+    const matchBySignature = new Map();
+
+    aiItems.forEach(item => {
+        if (!item || typeof item !== 'object') {
+            return;
+        }
+        const fieldId = String(item.field_id || item.fieldId || '').trim();
+        const fieldSignature = String(item.field_signature || item.fieldSignature || '').trim();
+        if (fieldId) {
+            matchByFieldId.set(fieldId, item);
+        }
+        if (fieldSignature) {
+            matchBySignature.set(fieldSignature, item);
+        }
+    });
+
+    return formFields.map((field, index) => {
+        const aiItem = matchByFieldId.get(field.fieldId) || matchBySignature.get(field.signature) || null;
+        const rawGrantzyKey = aiItem?.grantzy_key ?? aiItem?.grantzyKey ?? null;
+        const grantzyKey = rawGrantzyKey ? String(rawGrantzyKey) : null;
+        const grantzyKeyExists = grantzyKey
+            ? flatGrantzyFields.some(item => item.key === grantzyKey)
+            : false;
+        const confidence = normalizeConfidence(aiItem?.confidence);
+        let status = normalizeAiStatus(aiItem?.status, confidence, grantzyKeyExists ? grantzyKey : null);
+        let reason = String(aiItem?.reason || (status === 'skipped' ? 'no_match' : 'semantic_label_match'));
+        if (grantzyKey && !grantzyKeyExists) {
+            status = 'skipped';
+            reason = 'invalid_grantzy_key';
+        }
+        const candidateKeysRaw = Array.isArray(aiItem?.candidate_keys)
+            ? aiItem.candidate_keys
+            : (Array.isArray(aiItem?.candidateKeys) ? aiItem.candidateKeys : []);
+        const candidateKeys = Array.from(
+            new Set(
+                candidateKeysRaw
+                    .map(value => String(value || '').trim())
+                    .filter(Boolean)
+            )
+        );
+
+        let grantzyValue = grantzyKeyExists ? getGrantzyValueByKey(grantzyKey) : '';
+        let dropdownOption = null;
+
+        if (grantzyKeyExists && status !== 'skipped' && isDropdownField(field)) {
+            const optionMatch = resolveOptionMatch(field, grantzyValue);
+            dropdownOption = optionMatch.option;
+            if (optionMatch.reason === 'no_options') {
+                status = 'needs_review';
+                reason = 'dropdown_options_not_detected';
+            } else if (!optionMatch.option) {
+                status = 'needs_review';
+                reason = optionMatch.reason || reason;
+            }
+        }
+
+        if (status === 'skipped') {
+            grantzyValue = '';
+            dropdownOption = null;
+        }
+
+        return {
+            fieldId: field.fieldId,
+            fieldSignature: field.signature,
+            field,
+            fieldLabel: getFieldLabel(field, index),
+            widgetKind: field.widgetKind,
+            inputType: field.inputType,
+            grantzyKey: status === 'skipped' ? null : (grantzyKeyExists ? grantzyKey : null),
+            grantzyValue,
+            candidates: candidateKeys.map((key, candidateIndex) => ({
+                key,
+                value: getGrantzyValueByKey(key),
+                score: Math.max(0, confidence - (candidateIndex * 0.05)),
+                memoryBoost: 0
+            })),
+            confidence,
+            status,
+            reason,
+            dropdownOption,
+            enabled: status === 'auto' || status === 'needs_review' || status === 'manual'
+        };
+    });
+}
+
 function applyManualMapping(item, selectedKey) {
     if (!selectedKey) {
         item.grantzyKey = null;
@@ -971,15 +1111,32 @@ async function previewFillPlan() {
     setAutofillStatus('Building autofill preview...');
 
     const memory = await loadMappingMemory(latestScan.origin, latestScan.formFingerprint);
+    let usedFallback = false;
+    let fallbackReason = '';
 
-    currentFillPlan = buildFillPlan({
-        formFields: latestScan.fields,
-        grantzyFields: flatGrantzyFields,
-        memory
-    }).map(item => ({
-        ...item,
-        enabled: item.status === 'auto' || item.status === 'manual'
-    }));
+    if (selectedApplication?.uuid) {
+        const aiResponse = await sendRuntimeMessage({
+            action: 'matchFormFieldsWithAi',
+            applicationId: selectedApplication.uuid,
+            origin: latestScan.origin,
+            url: latestScan.url,
+            formFingerprint: latestScan.formFingerprint,
+            fields: latestScan.fields,
+            memoryHints: buildMemoryHints(memory)
+        });
+
+        if (aiResponse.success && Array.isArray(aiResponse.items) && aiResponse.items.length) {
+            currentFillPlan = buildAiFillPlan(aiResponse.items, latestScan.fields);
+        } else {
+            usedFallback = true;
+            fallbackReason = aiResponse.error || 'AI matching unavailable';
+            currentFillPlan = buildFallbackFillPlan(memory);
+        }
+    } else {
+        usedFallback = true;
+        fallbackReason = 'No selected application available for AI matching';
+        currentFillPlan = buildFallbackFillPlan(memory);
+    }
 
     setBusyState(false);
     renderFillPlan();
@@ -988,10 +1145,15 @@ async function previewFillPlan() {
     const reviewCount = currentFillPlan.filter(item => item.status === 'needs_review').length;
     const skippedCount = currentFillPlan.filter(item => item.status === 'skipped').length;
 
-    setAutofillStatus(
-        `Preview ready: ${autoCount} auto, ${reviewCount} review, ${skippedCount} skipped.`,
-        'success'
-    );
+    if (usedFallback) {
+        setAutofillStatus(
+            `AI unavailable, using fallback (${fallbackReason}). Preview ready: ${autoCount} auto, ${reviewCount} review, ${skippedCount} skipped.`,
+            'success'
+        );
+        return;
+    }
+
+    setAutofillStatus(`AI preview ready: ${autoCount} auto, ${reviewCount} review, ${skippedCount} skipped.`, 'success');
 }
 
 async function applyFillPlanToTab() {
