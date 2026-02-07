@@ -1,9 +1,15 @@
 export function normalizeString(str) {
-  return str.replace(/[\s._]+/g, '').toLowerCase();
+  return String(str ?? '')
+      .toLowerCase()
+      .replace(/[\s._-]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
 }
 
 export function normalizeTokens(str) {
-  return normalizeString(str).split(/\s+/);
+  return normalizeString(str)
+      .split(' ')
+      .filter(Boolean);
 }
 
 export function levenshteinDistance(a, b) {
@@ -41,4 +47,18 @@ export function addUniqueEventListener(element, event, listener) {
     element.addEventListener(event, listener);
     element._eventListeners.add(listenerKey);
   }
+}
+
+export function debounce(fn, wait = 200) {
+  let timeoutId = null;
+
+  return function debounced(...args) {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+
+    timeoutId = setTimeout(() => {
+      fn.apply(this, args);
+    }, wait);
+  };
 }

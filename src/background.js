@@ -1,13 +1,412 @@
 import config from './env.js';
 
 const apiBaseUrl = config.API_URL;
+const defaultApiToken = config.API_TOKEN || '';
+const defaultCredentialsMode = config.API_CREDENTIALS_MODE || 'omit';
 
-async function fetchJson(url) {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+const STORAGE_KEYS = {
+    apiToken: 'grantzyExtensionApiToken',
+    credentialsMode: 'grantzyExtensionCredentialsMode',
+    tokenMeta: 'grantzyExtensionTokenMeta'
+};
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function storageGet(keys) {
+    return new Promise(resolve => {
+        chrome.storage.local.get(keys, data => resolve(data || {}));
+    });
+}
+
+function storageSet(values) {
+    return new Promise(resolve => {
+        chrome.storage.local.set(values, () => resolve());
+    });
+}
+
+function sanitizeCredentialsMode(mode) {
+    return mode === 'include' ? 'include' : 'omit';
+}
+
+function normalizeToken(value) {
+    return typeof value === 'string' ? value.trim() : '';
+}
+
+function sanitizeOrganizationUuid(value) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return UUID_PATTERN.test(normalized) ? normalized : '';
+}
+
+function toTokenPreview(token) {
+    const normalized = normalizeToken(token);
+    if (!normalized) {
+        return '';
     }
+
+    if (normalized.length <= 14) {
+        return normalized;
+    }
+
+    return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
+}
+
+function sanitizeTokenMeta(meta) {
+    if (!meta || typeof meta !== 'object') {
+        return null;
+    }
+
+    return {
+        id: meta.id ? String(meta.id) : '',
+        name: meta.name ? String(meta.name) : '',
+        keyPrefix: meta.keyPrefix ? String(meta.keyPrefix) : '',
+        expiresAt: meta.expiresAt ? String(meta.expiresAt) : null,
+        source: meta.source ? String(meta.source) : 'manual',
+        createdAt: meta.createdAt ? String(meta.createdAt) : null
+    };
+}
+
+function buildApiUrl(pathname, query = {}) {
+    const url = new URL(pathname, apiBaseUrl);
+    Object.entries(query).forEach(([key, value]) => {
+        if (value === null || value === undefined || value === '') {
+            return;
+        }
+        url.searchParams.set(key, String(value));
+    });
+    return url.toString();
+}
+
+function toApiOriginLabel(rawUrl) {
+    try {
+        return new URL(rawUrl).origin;
+    } catch (_error) {
+        return String(rawUrl || '');
+    }
+}
+
+async function resolveApiRuntime() {
+    const data = await storageGet([
+        STORAGE_KEYS.apiToken,
+        STORAGE_KEYS.credentialsMode,
+        STORAGE_KEYS.tokenMeta
+    ]);
+
+    const storedToken = normalizeToken(data[STORAGE_KEYS.apiToken]);
+    const envToken = normalizeToken(defaultApiToken);
+    const activeToken = storedToken || envToken;
+    const activeTokenSource = storedToken ? 'storage' : (envToken ? 'env' : 'none');
+
+    return {
+        token: activeToken,
+        tokenSource: activeTokenSource,
+        credentialsMode: sanitizeCredentialsMode(data[STORAGE_KEYS.credentialsMode] || defaultCredentialsMode),
+        tokenMeta: sanitizeTokenMeta(data[STORAGE_KEYS.tokenMeta])
+    };
+}
+
+function createApiHeaders(token, extraHeaders = {}) {
+    const headers = {
+        Accept: 'application/json',
+        ...extraHeaders
+    };
+
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+
+    return headers;
+}
+
+async function fetchJson(url, options = {}, requestOverrides = {}) {
+    const runtime = await resolveApiRuntime();
+    const token = Object.prototype.hasOwnProperty.call(requestOverrides, 'token')
+        ? normalizeToken(requestOverrides.token)
+        : runtime.token;
+    const credentialsMode = Object.prototype.hasOwnProperty.call(requestOverrides, 'credentialsMode')
+        ? sanitizeCredentialsMode(requestOverrides.credentialsMode)
+        : runtime.credentialsMode;
+
+    const response = await fetch(url, {
+        credentials: credentialsMode,
+        ...options,
+        headers: createApiHeaders(token, options.headers || {})
+    });
+
+    if (!response.ok) {
+        let detail = '';
+        try {
+            const errorPayload = await response.json();
+            detail = String(
+                errorPayload?.detail ||
+                errorPayload?.error ||
+                ''
+            ).trim();
+        } catch (_error) {
+            detail = '';
+        }
+
+        const message = detail ? `${detail} (HTTP ${response.status})` : `HTTP ${response.status}`;
+        throw new Error(message);
+    }
+
     return response.json();
+}
+
+function normalizeApplicationsResponse(data) {
+    const rawItems = Array.isArray(data)
+        ? data
+        : (Array.isArray(data?.items) ? data.items : []);
+
+    const normalizedItems = [];
+    const seen = new Set();
+    rawItems.forEach(item => {
+        if (!item || typeof item !== 'object') {
+            return;
+        }
+
+        const uuid = String(item.uuid || item.id || '').trim();
+        const title = String(item.title || '').trim();
+        const companyName = String(item.company_name || item.companyName || '').trim();
+        const updatedAt = item.updated_at || item.updatedAt || null;
+        const dedupeKey = uuid || `${title.toLowerCase()}::${companyName.toLowerCase()}`;
+
+        if (dedupeKey && seen.has(dedupeKey)) {
+            return;
+        }
+        if (dedupeKey) {
+            seen.add(dedupeKey);
+        }
+
+        normalizedItems.push({
+            ...item,
+            uuid,
+            title,
+            company_name: companyName,
+            updated_at: updatedAt
+        });
+    });
+
+    if (Array.isArray(data)) {
+        return {
+            items: normalizedItems,
+            nextCursor: null
+        };
+    }
+
+    if (Array.isArray(data?.items)) {
+        return {
+            items: normalizedItems,
+            nextCursor: data.next_cursor ?? null
+        };
+    }
+
+    return {
+        items: [],
+        nextCursor: null
+    };
+}
+
+function describeHttpError(error, fallbackMessage) {
+    const statusMatch = String(error?.message || '').match(/HTTP\s+(\d+)/);
+    const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : null;
+
+    if (!status) {
+        return fallbackMessage;
+    }
+    if (status === 401 || status === 403) {
+        return 'Authentication failed. Check API token or session access.';
+    }
+    if (status >= 500) {
+        return 'Grantzy backend is temporarily unavailable. Try again shortly.';
+    }
+    return `${fallbackMessage} (HTTP ${status})`;
+}
+
+async function fetchApplicationsFromApi(query, limit, cursor = 0, organizationUuid = '') {
+    try {
+        const data = await fetchJson(
+            buildApiUrl('/api/extension/v1/spaces', {
+                q: query,
+                limit,
+                cursor,
+                organization_uuid: organizationUuid
+            })
+        );
+        const normalized = normalizeApplicationsResponse(data);
+        return {
+            applications: normalized.items,
+            nextCursor: normalized.nextCursor,
+            source: 'extension_v1'
+        };
+    } catch (error) {
+        // Fallback for older backend deployments.
+        const legacyData = await fetchJson(buildApiUrl('/api/spaces'));
+        const normalizedQuery = String(query || '').toLowerCase().trim();
+        const applications = normalizeApplicationsResponse(legacyData).items;
+
+        const filteredApplications = normalizedQuery
+            ? applications.filter(application => {
+                const title = String(application.title || '').toLowerCase();
+                const companyName = String(application.company_name || '').toLowerCase();
+                return title.includes(normalizedQuery) || companyName.includes(normalizedQuery);
+            })
+            : applications;
+
+        const nextSlice = filteredApplications.slice(cursor, cursor + limit);
+        const hasMore = cursor + limit < filteredApplications.length;
+
+        return {
+            applications: nextSlice,
+            nextCursor: hasMore ? cursor + limit : null,
+            source: 'legacy'
+        };
+    }
+}
+
+async function fetchApplicationDetailFromApi(applicationId) {
+    try {
+        return await fetchJson(buildApiUrl(`/api/extension/v1/spaces/${applicationId}`));
+    } catch (_error) {
+        // Fallback for older backend deployments.
+        return fetchJson(buildApiUrl(`/api/spaces/${applicationId}`));
+    }
+}
+
+async function fetchExtensionSessionFromApi({ forceSession = false } = {}) {
+    try {
+        return await fetchJson(
+            buildApiUrl('/api/extension/v1/session'),
+            {},
+            forceSession ? { credentialsMode: 'include', token: '' } : {}
+        );
+    } catch (error) {
+        const statusMatch = String(error?.message || '').match(/HTTP\s+(\d+)/);
+        const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : null;
+
+        if (status === 404) {
+            // Backward-compatible fallback when backend has no dedicated extension session endpoint yet.
+            await fetchJson(buildApiUrl('/api/spaces'));
+            const runtime = await resolveApiRuntime();
+            return {
+                user: {
+                    id: 'legacy',
+                    email: '',
+                    name: 'Legacy backend'
+                },
+                auth: {
+                    method: runtime.token ? 'bearer_token' : 'session',
+                    can_issue_tokens: false,
+                    token: null
+                },
+                meta: {
+                    legacy: true
+                }
+            };
+        }
+
+        throw new Error(describeHttpError(error, 'Could not verify API connection'));
+    }
+}
+
+async function issueExtensionTokenFromApi({ name = '', expiresInDays = null } = {}) {
+    const payload = {};
+    if (name && String(name).trim()) {
+        payload.name = String(name).trim();
+    }
+
+    if (expiresInDays !== null && expiresInDays !== undefined && expiresInDays !== '') {
+        payload.expires_in_days = Number.parseInt(String(expiresInDays), 10);
+    }
+
+    return fetchJson(
+        buildApiUrl('/api/extension/v1/tokens'),
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        },
+        {
+            credentialsMode: 'include',
+            token: ''
+        }
+    );
+}
+
+async function revokeExtensionTokenFromApi(tokenId) {
+    return fetchJson(
+        buildApiUrl(`/api/extension/v1/tokens/${tokenId}/revoke`),
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        },
+        {
+            credentialsMode: 'include',
+            token: ''
+        }
+    );
+}
+
+async function listExtensionTokensFromApi(limit = 20) {
+    const parsedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, limit)) : 20;
+    const data = await fetchJson(
+        buildApiUrl('/api/extension/v1/tokens/list', { limit: parsedLimit }),
+        {},
+        {
+            credentialsMode: 'include',
+            token: ''
+        }
+    );
+
+    return Array.isArray(data?.items) ? data.items : [];
+}
+
+async function saveExtensionSettings(payload = {}) {
+    const { apiToken, credentialsMode, tokenMeta } = payload;
+    const updates = {};
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'apiToken')) {
+        updates[STORAGE_KEYS.apiToken] = normalizeToken(apiToken);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'credentialsMode')) {
+        updates[STORAGE_KEYS.credentialsMode] = sanitizeCredentialsMode(credentialsMode);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'tokenMeta')) {
+        updates[STORAGE_KEYS.tokenMeta] = sanitizeTokenMeta(tokenMeta);
+    }
+
+    if (!Object.keys(updates).length) {
+        return;
+    }
+
+    await storageSet(updates);
+}
+
+async function clearStoredExtensionToken() {
+    await storageSet({
+        [STORAGE_KEYS.apiToken]: '',
+        [STORAGE_KEYS.tokenMeta]: null
+    });
+}
+
+async function getExtensionSettingsSummary() {
+    const runtime = await resolveApiRuntime();
+
+    return {
+        apiBaseUrl,
+        apiOrigin: toApiOriginLabel(apiBaseUrl),
+        tokenSource: runtime.tokenSource,
+        tokenPreview: toTokenPreview(runtime.token),
+        hasActiveToken: Boolean(runtime.token),
+        credentialsMode: runtime.credentialsMode,
+        tokenMeta: runtime.tokenMeta,
+        hasStoredToken: runtime.tokenSource === 'storage',
+        hasEnvToken: runtime.tokenSource === 'env'
+    };
 }
 
 function queryTabs(queryInfo) {
@@ -141,13 +540,145 @@ async function runTabAutofillAction(tabMessage) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     async function handleMessage() {
         if (message.action === 'fetchApplications') {
-            const data = await fetchJson(`${apiBaseUrl}/api/spaces`);
-            return { success: true, applications: data };
+            const query = typeof message.query === 'string' ? message.query.trim() : '';
+            const rawLimit = Number.parseInt(String(message.limit || ''), 10);
+            const rawCursor = Number.parseInt(String(message.cursor || ''), 10);
+            const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 40;
+            const cursor = Number.isFinite(rawCursor) ? Math.max(rawCursor, 0) : 0;
+            const organizationUuid = sanitizeOrganizationUuid(message.organizationUuid);
+            const payload = await fetchApplicationsFromApi(query, limit, cursor, organizationUuid);
+            return {
+                success: true,
+                applications: payload.applications,
+                nextCursor: payload.nextCursor,
+                source: payload.source
+            };
         }
 
         if (message.action === 'fetchApplicationData' && message.applicationId) {
-            const data = await fetchJson(`${apiBaseUrl}/api/spaces/${message.applicationId}`);
+            const data = await fetchApplicationDetailFromApi(message.applicationId);
             return { success: true, data };
+        }
+
+        if (message.action === 'getExtensionSession') {
+            const session = await fetchExtensionSessionFromApi({ forceSession: Boolean(message.forceSession) });
+            return { success: true, session };
+        }
+
+        if (message.action === 'getExtensionSettings') {
+            const settings = await getExtensionSettingsSummary();
+            return { success: true, settings };
+        }
+
+        if (message.action === 'saveExtensionSettings') {
+            const payload = {};
+            if (Object.prototype.hasOwnProperty.call(message, 'apiToken')) {
+                payload.apiToken = message.apiToken;
+            }
+            if (Object.prototype.hasOwnProperty.call(message, 'credentialsMode')) {
+                payload.credentialsMode = message.credentialsMode;
+            }
+            if (Object.prototype.hasOwnProperty.call(message, 'tokenMeta')) {
+                payload.tokenMeta = message.tokenMeta;
+            }
+
+            await saveExtensionSettings(payload);
+            const settings = await getExtensionSettingsSummary();
+            return { success: true, settings };
+        }
+
+        if (message.action === 'clearExtensionToken') {
+            await clearStoredExtensionToken();
+            const settings = await getExtensionSettingsSummary();
+            return { success: true, settings };
+        }
+
+        if (message.action === 'issueExtensionToken') {
+            const issued = await issueExtensionTokenFromApi({
+                name: message.name,
+                expiresInDays: message.expiresInDays
+            });
+
+            const tokenMeta = {
+                id: issued.id,
+                name: issued.name,
+                keyPrefix: issued.key_prefix || toTokenPreview(issued.token),
+                expiresAt: issued.expires_at || null,
+                source: 'issued',
+                createdAt: new Date().toISOString()
+            };
+
+            await saveExtensionSettings({
+                apiToken: issued.token,
+                credentialsMode: 'omit',
+                tokenMeta
+            });
+
+            const settings = await getExtensionSettingsSummary();
+            return {
+                success: true,
+                issuedToken: issued.token,
+                tokenMeta,
+                settings
+            };
+        }
+
+        if (message.action === 'revokeExtensionToken') {
+            const tokenId = String(message.tokenId || '').trim();
+            if (!tokenId) {
+                throw new Error('Token id is required for revoke.');
+            }
+
+            await revokeExtensionTokenFromApi(tokenId);
+            const runtime = await resolveApiRuntime();
+            if (runtime.tokenMeta?.id === tokenId) {
+                await clearStoredExtensionToken();
+            }
+
+            const settings = await getExtensionSettingsSummary();
+            return { success: true, settings };
+        }
+
+        if (message.action === 'rotateExtensionToken') {
+            const runtime = await resolveApiRuntime();
+            const existingTokenId = String(message.tokenId || runtime.tokenMeta?.id || '').trim();
+            if (!existingTokenId) {
+                throw new Error('Rotation requires a stored token issued from this extension.');
+            }
+
+            await revokeExtensionTokenFromApi(existingTokenId);
+            const issued = await issueExtensionTokenFromApi({
+                name: message.name || runtime.tokenMeta?.name || '',
+                expiresInDays: message.expiresInDays
+            });
+
+            const tokenMeta = {
+                id: issued.id,
+                name: issued.name,
+                keyPrefix: issued.key_prefix || toTokenPreview(issued.token),
+                expiresAt: issued.expires_at || null,
+                source: 'rotated',
+                createdAt: new Date().toISOString()
+            };
+
+            await saveExtensionSettings({
+                apiToken: issued.token,
+                credentialsMode: 'omit',
+                tokenMeta
+            });
+
+            const settings = await getExtensionSettingsSummary();
+            return {
+                success: true,
+                issuedToken: issued.token,
+                tokenMeta,
+                settings
+            };
+        }
+
+        if (message.action === 'listExtensionTokens') {
+            const tokens = await listExtensionTokensFromApi(Number.parseInt(String(message.limit || '20'), 10));
+            return { success: true, tokens };
         }
 
         if (message.action === 'scanFormInActiveTab') {

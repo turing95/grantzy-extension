@@ -1,5 +1,6 @@
 import {
     setupApplicationSearch,
+    setupDataSearch,
     flattenFields,
     updateDataResults,
     resultsSelection
@@ -11,7 +12,8 @@ import {
 } from './fillPlanner.js';
 import {
     loadMappingMemory,
-    saveMappingMemory
+    saveMappingMemory,
+    listRecentMappingMemories
 } from './mappingMemory.js';
 
 const searchInput = document.getElementById('app-search-input');
@@ -21,6 +23,29 @@ const containerEl = widgetEl.querySelector('.widget-container');
 const mainPanelEl = document.getElementById('main-panel');
 const headerEl = widgetEl.querySelector('.widget-header');
 const backButton = document.getElementById('back-button');
+const connectionStatusEl = document.getElementById('connection-status');
+const recheckConnectionBtn = document.getElementById('recheck-connection-btn');
+const applicationsViewButton = document.getElementById('show-applications-view-btn');
+const quickAccessViewButton = document.getElementById('show-quick-access-view-btn');
+const settingsViewButton = document.getElementById('show-settings-view-btn');
+const applicationsViewEl = document.getElementById('applications-view');
+const quickAccessViewEl = document.getElementById('quick-access-view');
+const settingsViewEl = document.getElementById('settings-view');
+const recentApplicationsListEl = document.getElementById('recent-applications-list');
+const recentMappingsListEl = document.getElementById('recent-mappings-list');
+const settingsStatusEl = document.getElementById('settings-status');
+const settingsCredentialsModeSelect = document.getElementById('settings-credentials-mode');
+const settingsTokenInput = document.getElementById('settings-token-input');
+const saveSettingsButton = document.getElementById('save-settings-btn');
+const clearTokenButton = document.getElementById('clear-token-btn');
+const validateSettingsButton = document.getElementById('validate-settings-btn');
+const issueTokenButton = document.getElementById('issue-token-btn');
+const rotateTokenButton = document.getElementById('rotate-token-btn');
+const revokeTokenButton = document.getElementById('revoke-token-btn');
+const settingsTokenNameInput = document.getElementById('settings-token-name-input');
+const settingsTokenExpirySelect = document.getElementById('settings-token-expiry-select');
+const settingsTokenMetaEl = document.getElementById('settings-token-meta');
+const settingsTokenListEl = document.getElementById('settings-token-list');
 
 const analyzeFormButton = document.getElementById('analyze-form-btn');
 const previewFillButton = document.getElementById('preview-fill-btn');
@@ -31,6 +56,7 @@ const autofillPreviewEl = document.getElementById('autofill-preview');
 const autofillReportEl = document.getElementById('autofill-report');
 
 widgetEl.searchContextData = null;
+widgetEl.activeOrganizationUuid = '';
 
 let sidebarEl = null;
 let selectedTreeNodeElement = null;
@@ -41,6 +67,14 @@ let flatGrantzyFields = [];
 let latestScan = null;
 let currentFillPlan = [];
 let isBusy = false;
+let currentView = 'applications';
+let extensionSettings = null;
+let canManageTokensWithSession = false;
+let activeApiOriginLabel = '';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const RECENT_APPLICATIONS_KEY = 'grantzyRecentApplicationsV1';
+const MAX_RECENT_APPLICATIONS = 8;
 
 function sendRuntimeMessage(payload) {
     return new Promise(resolve => {
@@ -59,6 +93,181 @@ function storageGet(keys) {
     return new Promise(resolve => {
         chrome.storage.local.get(keys, data => resolve(data));
     });
+}
+
+function storageSet(payload) {
+    return new Promise(resolve => {
+        chrome.storage.local.set(payload, () => resolve());
+    });
+}
+
+function formatRelativeTime(timestamp) {
+    if (!timestamp) {
+        return 'just now';
+    }
+
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+        return 'just now';
+    }
+
+    const delta = date.getTime() - Date.now();
+    const absoluteDelta = Math.abs(delta);
+    const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+
+    if (absoluteDelta < 60_000) {
+        return 'just now';
+    }
+    if (absoluteDelta < 3_600_000) {
+        return formatter.format(Math.round(delta / 60_000), 'minute');
+    }
+    if (absoluteDelta < 86_400_000) {
+        return formatter.format(Math.round(delta / 3_600_000), 'hour');
+    }
+    if (absoluteDelta < 2_592_000_000) {
+        return formatter.format(Math.round(delta / 86_400_000), 'day');
+    }
+    return formatter.format(Math.round(delta / 2_592_000_000), 'month');
+}
+
+function normalizeOriginLabel(origin) {
+    try {
+        const parsed = new URL(origin);
+        return parsed.host || origin;
+    } catch (_error) {
+        return origin || 'unknown origin';
+    }
+}
+
+function toApiOriginLabel(rawUrl) {
+    if (!rawUrl) {
+        return '';
+    }
+
+    try {
+        return new URL(rawUrl).origin;
+    } catch (_error) {
+        return String(rawUrl);
+    }
+}
+
+function sanitizeOrganizationUuid(value) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return UUID_PATTERN.test(normalized) ? normalized : '';
+}
+
+function extractOrganizationUuidFromUrl(rawUrl) {
+    try {
+        const parsed = new URL(rawUrl || '');
+        if (activeApiOriginLabel && parsed.origin !== activeApiOriginLabel) {
+            return '';
+        }
+
+        const segments = parsed.pathname.split('/').filter(Boolean);
+        const orgIndex = segments.indexOf('organizations');
+        if (orgIndex < 0 || orgIndex + 1 >= segments.length) {
+            return '';
+        }
+        return sanitizeOrganizationUuid(segments[orgIndex + 1]);
+    } catch (_error) {
+        return '';
+    }
+}
+
+async function refreshActiveOrganizationScope() {
+    const tabInfo = await sendRuntimeMessage({ action: 'getActiveTabInfo' });
+    if (!tabInfo.success) {
+        widgetEl.activeOrganizationUuid = '';
+        return '';
+    }
+
+    const scopedOrganizationUuid = extractOrganizationUuidFromUrl(tabInfo.url || '');
+    widgetEl.activeOrganizationUuid = scopedOrganizationUuid;
+    return scopedOrganizationUuid;
+}
+
+async function setupApplicationsViewSearch() {
+    await refreshActiveOrganizationScope();
+    setupApplicationSearch(searchInput, resultsContainer, widgetEl);
+}
+
+function getApiTargetLabel() {
+    return activeApiOriginLabel || 'the configured API host';
+}
+
+function setSettingsStatus(message, tone = 'neutral') {
+    if (!settingsStatusEl) {
+        return;
+    }
+
+    settingsStatusEl.textContent = message;
+    settingsStatusEl.classList.remove('error', 'success');
+    if (tone === 'error') {
+        settingsStatusEl.classList.add('error');
+    } else if (tone === 'success') {
+        settingsStatusEl.classList.add('success');
+    }
+}
+
+function getSelectedTokenExpiryDays() {
+    const raw = Number.parseInt(String(settingsTokenExpirySelect?.value || ''), 10);
+    if (!Number.isFinite(raw) || raw < 1) {
+        return 90;
+    }
+    return Math.min(raw, 365);
+}
+
+function showToast(message, duration = 2200) {
+    const toast = document.createElement('div');
+    toast.className = 'toast-message';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    window.setTimeout(() => {
+        toast.classList.add('hiding');
+        window.setTimeout(() => toast.remove(), 250);
+    }, duration);
+}
+
+function setConnectionStatus(message, tone = 'neutral') {
+    if (!connectionStatusEl) {
+        return;
+    }
+
+    connectionStatusEl.textContent = message;
+    connectionStatusEl.classList.remove('ok', 'error', 'pending');
+    if (tone === 'ok') {
+        connectionStatusEl.classList.add('ok');
+    } else if (tone === 'error') {
+        connectionStatusEl.classList.add('error');
+    } else if (tone === 'pending') {
+        connectionStatusEl.classList.add('pending');
+    }
+}
+
+function summarizeAuthMode(method) {
+    if (method === 'bearer_token') {
+        return 'token auth';
+    }
+    return 'session auth';
+}
+
+async function refreshConnectionStatus({ withSpinner = true } = {}) {
+    if (withSpinner) {
+        setConnectionStatus(`Checking connection to ${getApiTargetLabel()}...`, 'pending');
+    }
+
+    const response = await sendRuntimeMessage({ action: 'getExtensionSession' });
+    if (!response.success) {
+        setConnectionStatus(response.error || `Not connected to ${getApiTargetLabel()}.`, 'error');
+        return null;
+    }
+
+    const session = response.session || {};
+    const displayName = session.user?.name || session.user?.email || 'unknown user';
+    const authMode = summarizeAuthMode(session.auth?.method);
+    setConnectionStatus(`Connected to ${getApiTargetLabel()} as ${displayName} (${authMode})`, 'ok');
+    return session;
 }
 
 function requestOriginPermission(originPattern) {
@@ -125,6 +334,381 @@ function updateActionButtons() {
     previewFillButton.disabled = isBusy || !hasApplication || !flatGrantzyFields.length;
     applyFillButton.disabled = isBusy || !hasPlan || !hasSelectedPlanItems;
     undoFillButton.disabled = isBusy || !hasScan;
+}
+
+function getApplicationSummary(rawApplication) {
+    if (!rawApplication) {
+        return null;
+    }
+
+    const uuid = String(rawApplication.uuid || '').trim();
+    if (!uuid) {
+        return null;
+    }
+
+    return {
+        uuid,
+        title: String(rawApplication.title || '').trim() || 'Untitled application',
+        companyName: String(rawApplication.companyName || rawApplication.company_name || '').trim(),
+        updatedAt: rawApplication.updatedAt || rawApplication.updated_at || null,
+        openedAt: Date.now()
+    };
+}
+
+function applyViewVisibility() {
+    const isApplicationsView = currentView === 'applications';
+    applicationsViewEl?.classList.toggle('active', isApplicationsView);
+    quickAccessViewEl?.classList.toggle('active', currentView === 'quick_access');
+    settingsViewEl?.classList.toggle('active', currentView === 'settings');
+
+    applicationsViewButton?.classList.toggle('active', isApplicationsView);
+    quickAccessViewButton?.classList.toggle('active', currentView === 'quick_access');
+    settingsViewButton?.classList.toggle('active', currentView === 'settings');
+
+    if (searchInput) {
+        searchInput.classList.toggle('hidden', !isApplicationsView);
+    }
+
+    const shouldShowSidebar = Boolean(sidebarEl) && isApplicationsView;
+    containerEl.classList.toggle('no-sidebar', !shouldShowSidebar);
+
+    if (sidebarEl) {
+        sidebarEl.style.display = shouldShowSidebar ? '' : 'none';
+    }
+}
+
+async function setActiveView(nextView) {
+    currentView = nextView;
+    applyViewVisibility();
+
+    if (nextView === 'quick_access') {
+        await renderQuickAccessPanel();
+    } else if (nextView === 'settings') {
+        await refreshSettingsPanel();
+    }
+}
+
+async function getRecentApplications() {
+    const data = await storageGet(RECENT_APPLICATIONS_KEY);
+    const value = data[RECENT_APPLICATIONS_KEY];
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .filter(item => item && item.uuid)
+        .slice(0, MAX_RECENT_APPLICATIONS);
+}
+
+async function recordRecentApplication(rawApplication) {
+    const summary = getApplicationSummary(rawApplication);
+    if (!summary) {
+        return;
+    }
+
+    const current = await getRecentApplications();
+    const deduped = current.filter(item => item.uuid !== summary.uuid);
+    const next = [summary, ...deduped].slice(0, MAX_RECENT_APPLICATIONS);
+    await storageSet({ [RECENT_APPLICATIONS_KEY]: next });
+}
+
+function clearResultSelectionState() {
+    resultsContainer.innerHTML = '';
+    searchInput.disabled = false;
+    searchInput.value = '';
+}
+
+async function selectApplication(rawApplication, { focusSearch = true } = {}) {
+    const summary = getApplicationSummary(rawApplication);
+    if (!summary) {
+        setAutofillStatus('Invalid application selection.', 'error');
+        return;
+    }
+
+    await storageSet({
+        selectedApplication: {
+            uuid: summary.uuid,
+            title: summary.title,
+            companyName: summary.companyName,
+            updatedAt: summary.updatedAt
+        }
+    });
+
+    clearResultSelectionState();
+    const loader = document.createElement('div');
+    loader.className = 'loader';
+    loader.textContent = 'Loading application data...';
+    searchInput.disabled = true;
+    resultsContainer.appendChild(loader);
+
+    await new Promise(resolve => {
+        setupDataSearch(searchInput, resultsContainer, summary.uuid, widgetEl, () => resolve());
+    });
+
+    headerEl.textContent = `Application selected: ${summary.title} | ${summary.companyName}`;
+    backButton.style.display = 'block';
+    searchInput.disabled = false;
+    searchInput.value = '';
+    if (focusSearch) {
+        searchInput.focus();
+    }
+
+    await refreshFlatGrantzyFields();
+    await recordRecentApplication(summary);
+}
+
+function renderQuickEmptyState(container, message) {
+    container.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'state-card state-neutral';
+    empty.textContent = message;
+    container.appendChild(empty);
+}
+
+async function renderRecentApplicationsList() {
+    if (!recentApplicationsListEl) {
+        return;
+    }
+
+    const items = await getRecentApplications();
+    if (!items.length) {
+        renderQuickEmptyState(recentApplicationsListEl, 'No recent applications yet.');
+        return;
+    }
+
+    recentApplicationsListEl.innerHTML = '';
+    items.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'quick-item';
+
+        const meta = document.createElement('div');
+        meta.className = 'quick-item-meta';
+
+        const title = document.createElement('strong');
+        title.textContent = item.title;
+        meta.appendChild(title);
+
+        const detail = document.createElement('span');
+        const company = item.companyName || 'No company';
+        detail.textContent = `${company} • opened ${formatRelativeTime(item.openedAt)}`;
+        meta.appendChild(detail);
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Open';
+        button.addEventListener('click', async () => {
+            await setActiveView('applications');
+            await selectApplication(item);
+        });
+
+        row.appendChild(meta);
+        row.appendChild(button);
+        recentApplicationsListEl.appendChild(row);
+    });
+}
+
+async function handleRecentMappingClick(mappingItem) {
+    await setActiveView('applications');
+
+    if (!selectedApplication && mappingItem.application?.uuid) {
+        await selectApplication({
+            uuid: mappingItem.application.uuid,
+            title: mappingItem.application.title,
+            companyName: mappingItem.application.companyName
+        }, { focusSearch: false });
+    }
+
+    if (!selectedApplication && !mappingItem.application?.uuid) {
+        setAutofillStatus('Select an application before applying saved mapping memory.', 'error');
+        return;
+    }
+
+    await previewFillPlan();
+}
+
+async function renderRecentMappingsList() {
+    if (!recentMappingsListEl) {
+        return;
+    }
+
+    const recentMappings = await listRecentMappingMemories(8);
+    if (!recentMappings.length) {
+        renderQuickEmptyState(recentMappingsListEl, 'No mapping memory captured yet.');
+        return;
+    }
+
+    recentMappingsListEl.innerHTML = '';
+    recentMappings.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'quick-item';
+
+        const meta = document.createElement('div');
+        meta.className = 'quick-item-meta';
+
+        const title = document.createElement('strong');
+        const appLabel = item.application?.title || normalizeOriginLabel(item.origin);
+        title.textContent = appLabel;
+        meta.appendChild(title);
+
+        const detail = document.createElement('span');
+        detail.textContent = `${item.mappingCount} mappings • ${normalizeOriginLabel(item.origin)} • ${formatRelativeTime(item.updatedAt)}`;
+        meta.appendChild(detail);
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Use';
+        button.addEventListener('click', async () => {
+            await handleRecentMappingClick(item);
+        });
+
+        row.appendChild(meta);
+        row.appendChild(button);
+        recentMappingsListEl.appendChild(row);
+    });
+}
+
+async function renderQuickAccessPanel() {
+    await Promise.all([
+        renderRecentApplicationsList(),
+        renderRecentMappingsList()
+    ]);
+}
+
+function renderTokenMeta() {
+    if (!settingsTokenMetaEl) {
+        return;
+    }
+
+    const tokenMeta = extensionSettings?.tokenMeta;
+    if (tokenMeta?.id) {
+        const name = tokenMeta.name || 'Managed token';
+        const prefix = tokenMeta.keyPrefix || 'n/a';
+        const expires = tokenMeta.expiresAt
+            ? new Date(tokenMeta.expiresAt).toLocaleString()
+            : 'No expiry';
+        settingsTokenMetaEl.textContent = `${name} (${prefix}) • expires: ${expires}`;
+        return;
+    }
+
+    if (extensionSettings?.hasActiveToken) {
+        settingsTokenMetaEl.textContent = `Active token source: ${extensionSettings.tokenSource}. Preview: ${extensionSettings.tokenPreview || 'hidden'}`;
+        return;
+    }
+
+    settingsTokenMetaEl.textContent = 'No managed token yet.';
+}
+
+function renderTokenList(tokens = []) {
+    if (!settingsTokenListEl) {
+        return;
+    }
+
+    settingsTokenListEl.innerHTML = '';
+    if (!tokens.length) {
+        const empty = document.createElement('div');
+        empty.className = 'state-card state-neutral';
+        empty.textContent = 'No extension tokens visible for your current web session.';
+        settingsTokenListEl.appendChild(empty);
+        return;
+    }
+
+    tokens.forEach(token => {
+        const row = document.createElement('div');
+        row.className = 'settings-token-item';
+
+        const meta = document.createElement('div');
+        meta.className = 'settings-token-meta';
+
+        const title = document.createElement('strong');
+        const status = token.is_active && !token.is_expired ? 'active' : 'inactive';
+        title.textContent = `${token.name || 'Unnamed token'} (${status})`;
+        meta.appendChild(title);
+
+        const detail = document.createElement('span');
+        const created = token.created_at ? formatRelativeTime(token.created_at) : 'unknown';
+        detail.textContent = `${token.key_prefix || ''} • created ${created}`;
+        meta.appendChild(detail);
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Revoke';
+        button.disabled = !token.is_active || token.is_expired;
+        button.addEventListener('click', async () => {
+            const revoke = await sendRuntimeMessage({
+                action: 'revokeExtensionToken',
+                tokenId: token.id
+            });
+            if (!revoke.success) {
+                setSettingsStatus(revoke.error || 'Could not revoke token.', 'error');
+                return;
+            }
+
+            extensionSettings = revoke.settings || extensionSettings;
+            renderTokenMeta();
+            setSettingsStatus('Token revoked successfully.', 'success');
+            await refreshSettingsPanel();
+            await refreshConnectionStatus({ withSpinner: false });
+        });
+
+        row.appendChild(meta);
+        row.appendChild(button);
+        settingsTokenListEl.appendChild(row);
+    });
+}
+
+async function refreshSettingsList() {
+    const listResponse = await sendRuntimeMessage({ action: 'listExtensionTokens', limit: 20 });
+    if (!listResponse.success) {
+        renderTokenList([]);
+        return;
+    }
+
+    renderTokenList(Array.isArray(listResponse.tokens) ? listResponse.tokens : []);
+}
+
+async function refreshSettingsPanel() {
+    setSettingsStatus('Loading settings...', 'neutral');
+    const settingsResponse = await sendRuntimeMessage({ action: 'getExtensionSettings' });
+    if (!settingsResponse.success) {
+        setSettingsStatus(settingsResponse.error || 'Could not load extension settings.', 'error');
+        return;
+    }
+
+    extensionSettings = settingsResponse.settings;
+    activeApiOriginLabel = toApiOriginLabel(extensionSettings.apiBaseUrl || extensionSettings.apiOrigin);
+    if (settingsCredentialsModeSelect) {
+        settingsCredentialsModeSelect.value = extensionSettings.credentialsMode || 'omit';
+    }
+
+    if (settingsTokenInput) {
+        settingsTokenInput.value = '';
+        settingsTokenInput.placeholder = extensionSettings.tokenPreview
+            ? `Current: ${extensionSettings.tokenPreview}`
+            : 'grx_...';
+    }
+
+    if (settingsTokenNameInput && !settingsTokenNameInput.value) {
+        settingsTokenNameInput.value = extensionSettings.tokenMeta?.name || 'Grantzy Chrome Extension';
+    }
+
+    const sessionCheck = await sendRuntimeMessage({
+        action: 'getExtensionSession',
+        forceSession: true
+    });
+    canManageTokensWithSession = Boolean(sessionCheck.success);
+
+    issueTokenButton.disabled = !canManageTokensWithSession;
+    rotateTokenButton.disabled = !canManageTokensWithSession || !extensionSettings?.tokenMeta?.id;
+    revokeTokenButton.disabled = !canManageTokensWithSession || !extensionSettings?.tokenMeta?.id;
+
+    renderTokenMeta();
+    await refreshSettingsList();
+    setSettingsStatus(
+        canManageTokensWithSession
+            ? 'Settings loaded. Session management available.'
+            : `Settings loaded. Session management unavailable until you log in on ${getApiTargetLabel()}.`,
+        canManageTokensWithSession ? 'success' : 'neutral'
+    );
 }
 
 function statusBadge(status) {
@@ -313,12 +897,17 @@ function resetAutofillState() {
 async function refreshFlatGrantzyFields() {
     const data = await storageGet('selectedApplicationData');
     if (data.selectedApplicationData?.fields) {
-        flatGrantzyFields = flattenFields(data.selectedApplicationData.fields);
+        if (Array.isArray(data.selectedApplicationData.flatFields)) {
+            flatGrantzyFields = data.selectedApplicationData.flatFields;
+        } else {
+            flatGrantzyFields = flattenFields(data.selectedApplicationData.fields);
+        }
     } else {
         flatGrantzyFields = [];
     }
 
     updateActionButtons();
+    applyViewVisibility();
 }
 
 async function analyzeCurrentForm() {
@@ -446,7 +1035,22 @@ async function applyFillPlanToTab() {
         }));
 
     if (memoryItems.length && latestScan?.origin && latestScan?.formFingerprint) {
-        await saveMappingMemory(latestScan.origin, latestScan.formFingerprint, memoryItems);
+        await saveMappingMemory(
+            latestScan.origin,
+            latestScan.formFingerprint,
+            memoryItems,
+            {
+                application: selectedApplication
+                    ? {
+                        uuid: selectedApplication.uuid,
+                        title: selectedApplication.title,
+                        companyName: selectedApplication.companyName
+                    }
+                    : null,
+                formUrl: latestScan.url || null
+            }
+        );
+        await renderRecentMappingsList();
     }
 
     const filledCount = results.filter(result => result.status === 'filled').length;
@@ -483,22 +1087,34 @@ function renderTree(data) {
             : [];
 
     entries.forEach(item => {
-        let childData = item.value;
-        let hasChildren = false;
-        if (childData && typeof childData === 'object') {
-            if (Array.isArray(childData)) {
-                hasChildren = childData.length > 0;
-            } else {
-                hasChildren = Object.keys(childData).length > 0;
-            }
-        }
+        const rawChildData = item.value;
+        const hasChildren = Boolean(
+            rawChildData
+            && typeof rawChildData === 'object'
+            && (Array.isArray(rawChildData) ? rawChildData.length : Object.keys(rawChildData).length)
+        );
 
         const li = document.createElement('li');
-        li.textContent = item.key;
-        li.style.cursor = 'pointer';
         li.dataset.expanded = hasChildren ? 'false' : 'leaf';
 
-        li.addEventListener('click', event => {
+        const labelButton = document.createElement('button');
+        labelButton.type = 'button';
+        labelButton.className = 'tree-label';
+
+        const caret = document.createElement('span');
+        caret.className = hasChildren ? 'tree-caret' : 'tree-caret leaf';
+        caret.textContent = hasChildren ? '▸' : '•';
+        labelButton.appendChild(caret);
+
+        const text = document.createElement('span');
+        text.className = 'tree-label-text';
+        text.textContent = item.key;
+        text.title = item.key;
+        labelButton.appendChild(text);
+
+        li.appendChild(labelButton);
+
+        labelButton.addEventListener('click', event => {
             event.stopPropagation();
 
             if (!hasChildren) {
@@ -509,7 +1125,9 @@ function renderTree(data) {
 
             Array.from(li.parentElement.children).forEach(sibling => {
                 if (sibling !== li && sibling.dataset.expanded === 'true') {
-                    const childUl = sibling.querySelector('ul');
+                    const childUl = Array.from(sibling.children).find(
+                        child => child.tagName && child.tagName.toLowerCase() === 'ul'
+                    );
                     if (childUl) sibling.removeChild(childUl);
                     sibling.dataset.expanded = 'false';
                     sibling.classList.remove('selected');
@@ -517,9 +1135,10 @@ function renderTree(data) {
             });
 
             if (li.dataset.expanded === 'false') {
-                if (childData && typeof childData === 'object') {
-                    if (!Array.isArray(childData)) {
-                        childData = Object.keys(childData).map(key => ({ key, value: childData[key] }));
+                if (rawChildData && typeof rawChildData === 'object') {
+                    let childData = rawChildData;
+                    if (!Array.isArray(rawChildData)) {
+                        childData = Object.keys(rawChildData).map(key => ({ key, value: rawChildData[key] }));
                     }
                     const childUl = renderTree(childData);
                     li.appendChild(childUl);
@@ -527,10 +1146,12 @@ function renderTree(data) {
                 li.dataset.expanded = 'true';
                 setSelectedTreeNode(item.value, li);
             } else {
-                const childUl = li.querySelector('ul');
+                const childUl = Array.from(li.children).find(
+                    child => child.tagName && child.tagName.toLowerCase() === 'ul'
+                );
                 if (childUl) li.removeChild(childUl);
                 li.dataset.expanded = 'false';
-                if (selectedTreeNodeElement === li) {
+                if (selectedTreeNodeElement && li.contains(selectedTreeNodeElement)) {
                     clearSelectedTreeNode();
                 }
             }
@@ -621,7 +1242,7 @@ function updateSidebar(nextSelectedApplication) {
                 }
             } else {
                 const noData = document.createElement('p');
-                noData.textContent = 'No data available';
+                noData.textContent = 'No data available.';
                 sidebarEl.appendChild(noData);
             }
         });
@@ -641,6 +1262,152 @@ function updateSidebar(nextSelectedApplication) {
     }
 
     updateActionButtons();
+    applyViewVisibility();
+}
+
+async function saveSettingsFromForm() {
+    const credentialsMode = settingsCredentialsModeSelect?.value || 'omit';
+    const enteredToken = String(settingsTokenInput?.value || '').trim();
+    const payload = {
+        action: 'saveExtensionSettings',
+        credentialsMode
+    };
+
+    if (enteredToken) {
+        payload.apiToken = enteredToken;
+        payload.tokenMeta = null;
+    }
+
+    const response = await sendRuntimeMessage(payload);
+    if (!response.success) {
+        setSettingsStatus(response.error || 'Could not save settings.', 'error');
+        return;
+    }
+
+    extensionSettings = response.settings || extensionSettings;
+    if (settingsTokenInput) {
+        settingsTokenInput.value = '';
+    }
+
+    await refreshConnectionStatus({ withSpinner: true });
+    await refreshSettingsPanel();
+    setSettingsStatus('Settings saved.', 'success');
+}
+
+async function clearStoredTokenFromSettings() {
+    const response = await sendRuntimeMessage({ action: 'clearExtensionToken' });
+    if (!response.success) {
+        setSettingsStatus(response.error || 'Could not clear token.', 'error');
+        return;
+    }
+
+    extensionSettings = response.settings || extensionSettings;
+    if (settingsTokenInput) {
+        settingsTokenInput.value = '';
+    }
+
+    await refreshConnectionStatus({ withSpinner: true });
+    await refreshSettingsPanel();
+    setSettingsStatus('Stored token cleared.', 'success');
+}
+
+async function validateSettingsConnection() {
+    const session = await refreshConnectionStatus({ withSpinner: true });
+    if (!session) {
+        setSettingsStatus('Connection check failed. Verify token/session settings.', 'error');
+        return;
+    }
+
+    setSettingsStatus('Connection is healthy.', 'success');
+}
+
+async function issueManagedToken() {
+    if (!canManageTokensWithSession) {
+        setSettingsStatus(`Session login required on ${getApiTargetLabel()} to issue a token.`, 'error');
+        return;
+    }
+
+    setSettingsStatus('Issuing token from backend...', 'neutral');
+    const response = await sendRuntimeMessage({
+        action: 'issueExtensionToken',
+        name: settingsTokenNameInput?.value || 'Grantzy Chrome Extension',
+        expiresInDays: getSelectedTokenExpiryDays()
+    });
+
+    if (!response.success) {
+        setSettingsStatus(response.error || 'Could not issue token.', 'error');
+        return;
+    }
+
+    extensionSettings = response.settings || extensionSettings;
+    if (settingsTokenInput) {
+        settingsTokenInput.value = '';
+    }
+
+    showToast('New extension token issued');
+    await refreshConnectionStatus({ withSpinner: true });
+    await refreshSettingsPanel();
+    setSettingsStatus('New token issued and applied to extension settings.', 'success');
+}
+
+async function rotateManagedToken() {
+    if (!canManageTokensWithSession) {
+        setSettingsStatus(`Session login required on ${getApiTargetLabel()} to rotate a token.`, 'error');
+        return;
+    }
+
+    if (!extensionSettings?.tokenMeta?.id) {
+        setSettingsStatus('Rotation requires a managed token issued from this extension.', 'error');
+        return;
+    }
+
+    setSettingsStatus('Rotating token...', 'neutral');
+    const response = await sendRuntimeMessage({
+        action: 'rotateExtensionToken',
+        tokenId: extensionSettings.tokenMeta.id,
+        name: settingsTokenNameInput?.value || extensionSettings.tokenMeta.name || 'Grantzy Chrome Extension',
+        expiresInDays: getSelectedTokenExpiryDays()
+    });
+
+    if (!response.success) {
+        setSettingsStatus(response.error || 'Could not rotate token.', 'error');
+        return;
+    }
+
+    extensionSettings = response.settings || extensionSettings;
+    showToast('Token rotated');
+    await refreshConnectionStatus({ withSpinner: true });
+    await refreshSettingsPanel();
+    setSettingsStatus('Token rotated successfully.', 'success');
+}
+
+async function revokeManagedToken() {
+    if (!canManageTokensWithSession) {
+        setSettingsStatus(`Session login required on ${getApiTargetLabel()} to revoke tokens.`, 'error');
+        return;
+    }
+
+    if (!extensionSettings?.tokenMeta?.id) {
+        setSettingsStatus('No managed token is currently stored.', 'error');
+        return;
+    }
+
+    setSettingsStatus('Revoking token...', 'neutral');
+    const response = await sendRuntimeMessage({
+        action: 'revokeExtensionToken',
+        tokenId: extensionSettings.tokenMeta.id
+    });
+
+    if (!response.success) {
+        setSettingsStatus(response.error || 'Could not revoke token.', 'error');
+        return;
+    }
+
+    extensionSettings = response.settings || extensionSettings;
+    showToast('Token revoked');
+    await refreshConnectionStatus({ withSpinner: true });
+    await refreshSettingsPanel();
+    setSettingsStatus('Token revoked and removed from extension settings.', 'success');
 }
 
 analyzeFormButton.addEventListener('click', analyzeCurrentForm);
@@ -648,7 +1415,46 @@ previewFillButton.addEventListener('click', previewFillPlan);
 applyFillButton.addEventListener('click', applyFillPlanToTab);
 undoFillButton.addEventListener('click', undoLastFill);
 
-setupApplicationSearch(searchInput, resultsContainer, widgetEl);
+applicationsViewButton?.addEventListener('click', () => {
+    setActiveView('applications');
+});
+quickAccessViewButton?.addEventListener('click', () => {
+    setActiveView('quick_access');
+});
+settingsViewButton?.addEventListener('click', () => {
+    setActiveView('settings');
+});
+
+saveSettingsButton?.addEventListener('click', () => {
+    saveSettingsFromForm();
+});
+clearTokenButton?.addEventListener('click', () => {
+    clearStoredTokenFromSettings();
+});
+validateSettingsButton?.addEventListener('click', () => {
+    validateSettingsConnection();
+});
+issueTokenButton?.addEventListener('click', () => {
+    issueManagedToken();
+});
+rotateTokenButton?.addEventListener('click', () => {
+    rotateManagedToken();
+});
+revokeTokenButton?.addEventListener('click', () => {
+    revokeManagedToken();
+});
+
+if (recheckConnectionBtn) {
+    recheckConnectionBtn.addEventListener('click', async () => {
+        const session = await refreshConnectionStatus({ withSpinner: true });
+        if (currentView === 'settings') {
+            setSettingsStatus(
+                session ? 'Connection refreshed successfully.' : 'Connection refresh failed.',
+                session ? 'success' : 'error'
+            );
+        }
+    });
+}
 
 backButton.addEventListener('click', () => {
     chrome.storage.local.remove(['selectedApplication', 'selectedApplicationData'], async () => {
@@ -660,7 +1466,9 @@ backButton.addEventListener('click', () => {
         resultsContainer.innerHTML = '';
         searchInput.disabled = false;
         searchInput.value = '';
-        setupApplicationSearch(searchInput, resultsContainer, widgetEl);
+        await setupApplicationsViewSearch();
+        await renderQuickAccessPanel();
+        await setActiveView('applications');
     });
 });
 
@@ -670,7 +1478,12 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
     }
 
     if (changes.selectedApplication) {
-        updateSidebar(changes.selectedApplication.newValue);
+        const nextApplication = changes.selectedApplication.newValue || null;
+        updateSidebar(nextApplication);
+        if (nextApplication) {
+            await recordRecentApplication(nextApplication);
+            await renderRecentApplicationsList();
+        }
     }
 
     if (changes.selectedApplicationData) {
@@ -679,6 +1492,10 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
             updateSidebar(data.selectedApplication);
         });
     }
+
+    if (changes[RECENT_APPLICATIONS_KEY] && currentView === 'quick_access') {
+        await renderRecentApplicationsList();
+    }
 });
 
 chrome.storage.local.get('selectedApplication', async data => {
@@ -686,4 +1503,10 @@ chrome.storage.local.get('selectedApplication', async data => {
     await refreshFlatGrantzyFields();
     resetAutofillState();
     setAutofillStatus('Select an application and click Analyze Current Form.');
+    await refreshSettingsPanel();
+    await setupApplicationsViewSearch();
+    await setActiveView('applications');
+    await refreshConnectionStatus({ withSpinner: false });
+    await renderQuickAccessPanel();
+    applyViewVisibility();
 });
