@@ -329,10 +329,11 @@ function updateActionButtons() {
     const hasScan = Boolean(latestScan?.fields?.length);
     const hasPlan = currentFillPlan.length > 0;
     const hasSelectedPlanItems = currentFillPlan.some(item => item.enabled && item.grantzyKey);
+    const canFillAll = hasApplication && flatGrantzyFields.length && (!hasPlan || hasSelectedPlanItems);
 
     analyzeFormButton.disabled = isBusy || !hasApplication;
     previewFillButton.disabled = isBusy || !hasApplication || !flatGrantzyFields.length;
-    applyFillButton.disabled = isBusy || !hasPlan || !hasSelectedPlanItems;
+    applyFillButton.disabled = isBusy || !canFillAll;
     undoFillButton.disabled = isBusy || !hasScan;
 }
 
@@ -907,7 +908,7 @@ function renderFillPlan() {
 
     if (!currentFillPlan.length) {
         const empty = document.createElement('div');
-        empty.textContent = 'No fill plan yet. Click Preview Fill after analyzing a form.';
+        empty.textContent = 'No fill plan yet. Click Fill All for one-click autofill, or Preview Fill to review first.';
         autofillPreviewEl.appendChild(empty);
         updateActionButtons();
         return;
@@ -1004,7 +1005,8 @@ function renderFillReport(results = []) {
 
     const summary = {
         filled: 0,
-        skipped: 0
+        skipped: 0,
+        review: 0
     };
 
     results.forEach(result => {
@@ -1014,15 +1016,20 @@ function renderFillReport(results = []) {
             summary.skipped += 1;
         }
 
+        if (result.reviewHighlighted) {
+            summary.review += 1;
+        }
+
         const line = document.createElement('div');
-        line.textContent = `${result.fieldId}: ${result.status} (${result.reason || 'n/a'})`;
+        const reviewSuffix = result.reviewHighlighted ? ' | review-highlighted' : '';
+        line.textContent = `${result.fieldId}: ${result.status} (${result.reason || 'n/a'})${reviewSuffix}`;
         autofillReportEl.appendChild(line);
     });
 
     const heading = document.createElement('div');
     heading.style.marginBottom = '6px';
     heading.style.fontWeight = 'bold';
-    heading.textContent = `Filled ${summary.filled}, Skipped ${summary.skipped}`;
+    heading.textContent = `Filled ${summary.filled}, Review ${summary.review}, Skipped ${summary.skipped}`;
     autofillReportEl.prepend(heading);
 }
 
@@ -1030,7 +1037,7 @@ function resetAutofillState() {
     latestScan = null;
     currentFillPlan = [];
     autofillReportEl.textContent = '';
-    autofillPreviewEl.textContent = 'No fill plan yet. Click Preview Fill after analyzing a form.';
+    autofillPreviewEl.textContent = 'No fill plan yet. Click Fill All for one-click autofill, or Preview Fill to review first.';
     updateActionButtons();
 }
 
@@ -1050,15 +1057,17 @@ async function refreshFlatGrantzyFields() {
     applyViewVisibility();
 }
 
-async function analyzeCurrentForm() {
+async function analyzeCurrentForm({ skipPermissionCheck = false } = {}) {
     if (!selectedApplication) {
         setAutofillStatus('Select an application first.', 'error');
-        return;
+        return false;
     }
 
-    const hasPermission = await ensureActiveTabPermission();
-    if (!hasPermission) {
-        return;
+    if (!skipPermissionCheck) {
+        const hasPermission = await ensureActiveTabPermission();
+        if (!hasPermission) {
+            return false;
+        }
     }
 
     setBusyState(true);
@@ -1069,7 +1078,7 @@ async function analyzeCurrentForm() {
 
     if (!response.success) {
         setAutofillStatus(response.error || 'Could not analyze form.', 'error');
-        return;
+        return false;
     }
 
     latestScan = {
@@ -1081,34 +1090,41 @@ async function analyzeCurrentForm() {
 
     if (!latestScan.fields.length) {
         setAutofillStatus('No fillable fields detected on this page.', 'error');
+        renderFillReport([]);
+        currentFillPlan = [];
+        renderFillPlan();
+        return false;
     } else {
-        setAutofillStatus(`Detected ${latestScan.fields.length} fields. Click Preview Fill to inspect mapping.`, 'success');
+        setAutofillStatus(`Detected ${latestScan.fields.length} fields. Click Fill All for one-click autofill, or Preview Fill to inspect mapping.`, 'success');
     }
 
     renderFillReport([]);
     currentFillPlan = [];
     renderFillPlan();
+    return true;
 }
 
-async function previewFillPlan() {
+async function previewFillPlan({ skipPermissionCheck = false, suppressPreviewStatus = false } = {}) {
     if (!flatGrantzyFields.length) {
         await refreshFlatGrantzyFields();
     }
 
     if (!flatGrantzyFields.length) {
         setAutofillStatus('No application data loaded yet. Select an application first.', 'error');
-        return;
+        return false;
     }
 
     if (!latestScan?.fields?.length) {
-        await analyzeCurrentForm();
-        if (!latestScan?.fields?.length) {
-            return;
+        const analyzed = await analyzeCurrentForm({ skipPermissionCheck });
+        if (!analyzed || !latestScan?.fields?.length) {
+            return false;
         }
     }
 
     setBusyState(true);
-    setAutofillStatus('Building autofill preview...');
+    if (!suppressPreviewStatus) {
+        setAutofillStatus('Building autofill preview...');
+    }
 
     const memory = await loadMappingMemory(latestScan.origin, latestScan.formFingerprint);
     let usedFallback = false;
@@ -1146,17 +1162,22 @@ async function previewFillPlan() {
     const skippedCount = currentFillPlan.filter(item => item.status === 'skipped').length;
 
     if (usedFallback) {
-        setAutofillStatus(
-            `AI unavailable, using fallback (${fallbackReason}). Preview ready: ${autoCount} auto, ${reviewCount} review, ${skippedCount} skipped.`,
-            'success'
-        );
-        return;
+        if (!suppressPreviewStatus) {
+            setAutofillStatus(
+                `AI unavailable, using fallback (${fallbackReason}). Preview ready: ${autoCount} auto, ${reviewCount} review, ${skippedCount} skipped.`,
+                'success'
+            );
+        }
+        return true;
     }
 
-    setAutofillStatus(`AI preview ready: ${autoCount} auto, ${reviewCount} review, ${skippedCount} skipped.`, 'success');
+    if (!suppressPreviewStatus) {
+        setAutofillStatus(`AI preview ready: ${autoCount} auto, ${reviewCount} review, ${skippedCount} skipped.`, 'success');
+    }
+    return true;
 }
 
-async function applyFillPlanToTab() {
+async function applyFillPlanToTab({ skipPermissionCheck = false } = {}) {
     const selectedItems = currentFillPlan.filter(item => item.enabled && item.grantzyKey);
 
     if (!selectedItems.length) {
@@ -1164,9 +1185,11 @@ async function applyFillPlanToTab() {
         return;
     }
 
-    const hasPermission = await ensureActiveTabPermission();
-    if (!hasPermission) {
-        return;
+    if (!skipPermissionCheck) {
+        const hasPermission = await ensureActiveTabPermission();
+        if (!hasPermission) {
+            return;
+        }
     }
 
     setBusyState(true);
@@ -1216,8 +1239,34 @@ async function applyFillPlanToTab() {
     }
 
     const filledCount = results.filter(result => result.status === 'filled').length;
+    const reviewCount = results.filter(result => result.reviewHighlighted).length;
     const skippedCount = results.length - filledCount;
-    setAutofillStatus(`Autofill complete. Filled ${filledCount}, skipped ${skippedCount}.`, 'success');
+    setAutofillStatus(`Autofill complete. Filled ${filledCount}, review ${reviewCount}, skipped ${skippedCount}.`, 'success');
+}
+
+async function fillAllWithConfidenceTiers() {
+    if (!selectedApplication) {
+        setAutofillStatus('Select an application first.', 'error');
+        return;
+    }
+
+    const hasPermission = await ensureActiveTabPermission();
+    if (!hasPermission) {
+        return;
+    }
+
+    if (!currentFillPlan.length) {
+        setAutofillStatus('Preparing one-click Fill All...');
+        const hasPlan = await previewFillPlan({
+            skipPermissionCheck: true,
+            suppressPreviewStatus: true
+        });
+        if (!hasPlan || !currentFillPlan.length) {
+            return;
+        }
+    }
+
+    await applyFillPlanToTab({ skipPermissionCheck: true });
 }
 
 async function undoLastFill() {
@@ -1574,7 +1623,7 @@ async function revokeManagedToken() {
 
 analyzeFormButton.addEventListener('click', analyzeCurrentForm);
 previewFillButton.addEventListener('click', previewFillPlan);
-applyFillButton.addEventListener('click', applyFillPlanToTab);
+applyFillButton.addEventListener('click', fillAllWithConfidenceTiers);
 undoFillButton.addEventListener('click', undoLastFill);
 
 applicationsViewButton?.addEventListener('click', () => {
@@ -1623,7 +1672,7 @@ backButton.addEventListener('click', () => {
         updateSidebar(null);
         await refreshFlatGrantzyFields();
         resetAutofillState();
-        setAutofillStatus('Select an application and click Analyze Current Form.');
+        setAutofillStatus('Select an application and click Fill All.');
 
         resultsContainer.innerHTML = '';
         searchInput.disabled = false;
@@ -1664,7 +1713,7 @@ chrome.storage.local.get('selectedApplication', async data => {
     updateSidebar(data.selectedApplication);
     await refreshFlatGrantzyFields();
     resetAutofillState();
-    setAutofillStatus('Select an application and click Analyze Current Form.');
+    setAutofillStatus('Select an application and click Fill All.');
     await refreshSettingsPanel();
     await setupApplicationsViewSearch();
     await setActiveView('applications');

@@ -5,6 +5,32 @@
     window.__grantzyAutofillBootstrap = true;
 
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const REVIEW_HIGHLIGHT_CLASS = 'grantzy-fill-review-highlight';
+    const REVIEW_HIGHLIGHT_STYLE_ID = 'grantzy-fill-review-highlight-style';
+
+    function ensureReviewHighlightStyles() {
+        if (document.getElementById(REVIEW_HIGHLIGHT_STYLE_ID)) {
+            return;
+        }
+
+        const style = document.createElement('style');
+        style.id = REVIEW_HIGHLIGHT_STYLE_ID;
+        style.textContent = `
+            .${REVIEW_HIGHLIGHT_CLASS} {
+                outline: 2px solid #fbbf24 !important;
+                outline-offset: 2px !important;
+                background-color: rgba(253, 224, 71, 0.2) !important;
+                transition: outline-color 120ms ease, background-color 120ms ease;
+            }
+        `;
+        document.documentElement.appendChild(style);
+    }
+
+    function clearReviewHighlights() {
+        document.querySelectorAll(`.${REVIEW_HIGHLIGHT_CLASS}`).forEach(element => {
+            element.classList.remove(REVIEW_HIGHLIGHT_CLASS);
+        });
+    }
 
     function normalize(value) {
         return String(value ?? '')
@@ -127,6 +153,36 @@
         }
 
         return 'unknown';
+    }
+
+    function getReviewHighlightTarget(element, widgetKind) {
+        if (!element) {
+            return null;
+        }
+
+        if (widgetKind === 'antd-select' || widgetKind === 'mui-select' || widgetKind === 'react-select' || widgetKind === 'custom-combobox') {
+            return element.querySelector('[role="combobox"]') ||
+                element.querySelector('.ant-select-selector') ||
+                element.querySelector('.MuiSelect-select') ||
+                element;
+        }
+
+        if (widgetKind === 'native-radio') {
+            return element.closest('label') || element.parentElement || element;
+        }
+
+        return element;
+    }
+
+    function markFieldForReview(element, widgetKind) {
+        const target = getReviewHighlightTarget(element, widgetKind);
+        if (!target) {
+            return false;
+        }
+
+        ensureReviewHighlightStyles();
+        target.classList.add(REVIEW_HIGHLIGHT_CLASS);
+        return true;
     }
 
     function getCssPath(element) {
@@ -509,6 +565,10 @@
         const previousState = capturePreviousState(element, item.field);
         const desiredValue = String(item.grantzyValue ?? '');
         const widgetKind = item.field?.widgetKind || detectWidgetKind(element);
+        const shouldHighlightReview = String(item?.status || '') === 'needs_review';
+        const maybeMarkReview = (targetElement = element, targetWidgetKind = widgetKind) => (
+            shouldHighlightReview ? markFieldForReview(targetElement, targetWidgetKind) : false
+        );
 
         try {
             if (widgetKind === 'native-checkbox') {
@@ -519,7 +579,8 @@
                     status: 'filled',
                     reason: 'filled',
                     appliedValue: String(element.checked),
-                    previousState
+                    previousState,
+                    reviewHighlighted: maybeMarkReview(element, widgetKind)
                 };
             }
 
@@ -546,7 +607,8 @@
                     status: 'filled',
                     reason: 'filled',
                     appliedValue: target.value,
-                    previousState
+                    previousState,
+                    reviewHighlighted: maybeMarkReview(target, widgetKind)
                 };
             }
 
@@ -557,7 +619,8 @@
                     status: result.success ? 'filled' : 'skipped',
                     reason: result.reason,
                     appliedValue: result.appliedValue,
-                    previousState
+                    previousState,
+                    reviewHighlighted: result.success ? maybeMarkReview(element, widgetKind) : false
                 };
             }
 
@@ -569,7 +632,8 @@
                     status: result.success ? 'filled' : 'skipped',
                     reason: result.reason,
                     appliedValue: result.appliedValue,
-                    previousState
+                    previousState,
+                    reviewHighlighted: result.success ? maybeMarkReview(element, widgetKind) : false
                 };
             }
 
@@ -580,7 +644,8 @@
                     status: 'filled',
                     reason: 'filled',
                     appliedValue: desiredValue,
-                    previousState
+                    previousState,
+                    reviewHighlighted: maybeMarkReview(element, widgetKind)
                 };
             }
 
@@ -598,6 +663,7 @@
         const items = Array.isArray(planItems) ? planItems : [];
         const results = [];
         const previousStates = [];
+        clearReviewHighlights();
 
         for (const item of items) {
             const result = await applySingleField(item);
@@ -655,6 +721,7 @@
 
     async function undoLastFill() {
         const state = window.__grantzyLastFillState;
+        clearReviewHighlights();
         if (!state || !Array.isArray(state.entries) || !state.entries.length) {
             return {
                 success: true,
