@@ -5,14 +5,14 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Grantzy Application Sidepanel</title>
-    <!-- Core sidepanel script -->
     <script type="module" src="../dist/sidepanel.js"></script>
-    <!-- Styles for sidebar tree -->
     <style>
-/* Overall widget container */
 .grantzy-widget {
   position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background-color: #fff;
   padding: 15px;
   z-index: 2000;
@@ -21,26 +21,23 @@
   display: flex;
   flex-direction: column;
   font-family: 'Helvetica Neue', Arial, sans-serif;
-  transition: transform 0.3s ease, opacity 0.3s ease;
   overflow: hidden;
 }
 
-/* Grid-based inner layout */
 .grantzy-widget .widget-container {
   display: grid;
   grid-template-areas:
     "header header"
     "search search"
     "sidebar main";
-  grid-template-columns: 300px 1fr; /* sidebar fixed, main flexible */
-  grid-template-rows: auto auto 1fr; /* header, search, content */
+  grid-template-columns: 280px 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 10px;
   flex: 1;
   overflow: hidden;
   padding: 0 10px 10px;
 }
 
-/* Header */
 .grantzy-widget .widget-header {
   grid-area: header;
   font-size: 1.2em;
@@ -50,7 +47,6 @@
   margin: 0;
 }
 
-/* Back button */
 #back-button {
   position: absolute;
   top: 20px;
@@ -61,13 +57,12 @@
   padding: 8px 12px;
   border-radius: 4px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
 }
+
 #back-button:hover {
   background-color: #0056b3;
 }
 
-/* Search input */
 #app-search-input {
   grid-area: search;
   width: 100%;
@@ -78,31 +73,34 @@
   font-size: 1em;
 }
 
-/* Sidebar */
 .grantzy-widget .widget-sidebar {
   grid-area: sidebar;
   border-right: 1px solid #ddd;
   background-color: #fafafa;
   overflow-y: auto;
 }
-.grantzy-widget .widget-sidebar h3 {
-  margin-top: 0;
-  font-size: 1.1em;
-}
 
-/* Sidebar selection highlight */
 .grantzy-widget .widget-sidebar li.selected-root {
   background-color: #e0f7fa;
 }
 
-/* Main results panel */
-.grantzy-widget .widget-main {
+#main-panel {
   grid-area: main;
-  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  gap: 10px;
+}
+
+#app-search-results {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+  min-height: 130px;
+  max-height: 240px;
   overflow-y: auto;
 }
 
-/* Result items */
 .grantzy-widget .result-item {
   cursor: pointer;
   border: 1px solid transparent;
@@ -111,15 +109,14 @@
   margin-bottom: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
+
 .grantzy-widget .result-item:hover,
 .grantzy-widget .result-item.hovered {
   background-color: #f0f8ff;
   border-color: #add8e6;
 }
 
-/* Key/value styling */
 .result-key {
   display: block;
   font-weight: bold;
@@ -128,22 +125,142 @@
   text-overflow: ellipsis;
   margin-bottom: 4px;
 }
+
 .result-value {
   white-space: normal;
 }
 
-/* Loader */
-.grantzy-widget .loader {
-  font-style: italic;
-  color: #777;
+#autofill-panel {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
 }
 
-/* Global button tweaks */
-.grantzy-widget button {
-  font-family: inherit;
+.autofill-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
+
+.autofill-actions button {
+  background-color: #1f2937;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 0.86em;
+}
+
+.autofill-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#autofill-status {
+  font-size: 0.9em;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f3f4f6;
+  color: #111827;
+}
+
+#autofill-status.error {
+  background: #fee2e2;
+  color: #7f1d1d;
+}
+
+#autofill-status.success {
+  background: #dcfce7;
+  color: #14532d;
+}
+
+#autofill-preview {
+  overflow-y: auto;
+  max-height: 280px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.preview-row {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 4px;
+  align-items: start;
+}
+
+.preview-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.preview-badge {
+  font-size: 0.72em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+}
+
+.preview-badge.auto,
+.preview-badge.manual {
+  background: #dcfce7;
+  color: #14532d;
+  border-color: #86efac;
+}
+
+.preview-badge.needs_review {
+  background: #fef9c3;
+  color: #713f12;
+  border-color: #fcd34d;
+}
+
+.preview-badge.skipped {
+  background: #fee2e2;
+  color: #7f1d1d;
+  border-color: #fca5a5;
+}
+
+.preview-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.preview-controls select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+}
+
+#autofill-report {
+  font-size: 0.85em;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
 .grantzy-widget .widget-container.no-sidebar {
-  /* collapse to one column and stretch main */
   grid-template-areas:
     "header header"
     "search search"
@@ -155,24 +272,26 @@
 <body>
 <div id="grantzy-sidepanel" class="grantzy-widget">
     <div class="widget-container">
-
-        <!-- Header -->
         <div class="widget-header">Grantzy Applications</div>
-        <!-- Back button -->
         <button id="back-button">← Back</button>
-        <!-- Search input -->
-        <input
-                type="text"
-                id="app-search-input"
-                placeholder="Search applications..."
-        />
+        <input type="text" id="app-search-input" placeholder="Search applications..."/>
 
-        <!-- Sidebar tree will be inserted here dynamically -->
-        <!-- Main results -->
-        <div id="app-search-results" class="results-container widget-main"></div>
+        <div id="main-panel">
+            <div id="app-search-results" class="results-container"></div>
+
+            <section id="autofill-panel">
+                <div class="autofill-actions">
+                    <button id="analyze-form-btn" type="button">Analyze Current Form</button>
+                    <button id="preview-fill-btn" type="button">Preview Fill</button>
+                    <button id="apply-fill-btn" type="button">Apply Fill</button>
+                    <button id="undo-fill-btn" type="button">Undo Last Fill</button>
+                </div>
+                <div id="autofill-status">Select an application and click Analyze Current Form.</div>
+                <div id="autofill-preview"></div>
+                <div id="autofill-report"></div>
+            </section>
+        </div>
     </div>
 </div>
-
-
 </body>
 </html>

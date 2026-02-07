@@ -1,8 +1,3 @@
-export function isInputOrTextarea(element) {
-  const tagName = element.tagName.toLowerCase();
-  return tagName === 'input' || tagName === 'textarea';
-}
-
 export function normalizeString(str) {
   return str.replace(/[\s._]+/g, '').toLowerCase();
 }

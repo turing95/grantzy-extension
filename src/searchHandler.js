@@ -17,7 +17,7 @@ export function fetchApplications() {
     });
 }
 
-export function setupApplicationSearch(searchInput, resultsContainer, targetElement, callback) {
+export function setupApplicationSearch(searchInput, resultsContainer, contextHolder, callback) {
     searchInput.placeholder = 'Search applications...';
 
     function applicationSearchListener() {
@@ -40,7 +40,7 @@ export function setupApplicationSearch(searchInput, resultsContainer, targetElem
             .filter(result => result.relevance > 0.3)
             .sort((a, b) => b.relevance - a.relevance);
         const filteredResults = rankedResults.map(r => r.application);
-        updateApplicationResults(resultsContainer, filteredResults, searchInput, targetElement);
+        updateApplicationResults(resultsContainer, filteredResults, searchInput, contextHolder);
         resultsSelection(resultsContainer, searchInput);
     }
 
@@ -49,7 +49,7 @@ export function setupApplicationSearch(searchInput, resultsContainer, targetElem
     if (callback) callback();
 }
 
-export function setupDataSearch(searchInput, resultsContainer, applicationId, targetElement, callback) {
+export function setupDataSearch(searchInput, resultsContainer, applicationId, contextHolder, callback) {
     // Remove the application search listener if it exists.
     if (searchInput._applicationSearchListener) {
         searchInput.removeEventListener('input', searchInput._applicationSearchListener);
@@ -60,7 +60,7 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, ta
     searchInput._dataSearchAttached = false;
 
     // Clear previous search context to ensure data search uses fresh fields.
-    targetElement.searchContextData = null;
+    contextHolder.searchContextData = null;
 
     searchInput.placeholder = 'Search data...';
     chrome.runtime.sendMessage({action: "fetchApplicationData", applicationId: applicationId}, (response) => {
@@ -74,7 +74,7 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, ta
                 }
             });
             const fields = flattenFields(response.data.fields);
-            updateResultsContainer(resultsContainer, fields, targetElement, searchInput);
+            updateResultsContainer(resultsContainer, fields, contextHolder, searchInput);
             resultsSelection(resultsContainer, searchInput);
             if (callback) callback();
         } else {
@@ -84,7 +84,7 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, ta
     });
 }
 
-export function updateApplicationResults(container, results, searchInput, targetElement) {
+export function updateApplicationResults(container, results, searchInput, contextHolder) {
     container.innerHTML = '';
     results.forEach((result, index) => {
         const resultItem = createResultItem(result.title, result.company_name);
@@ -96,14 +96,14 @@ export function updateApplicationResults(container, results, searchInput, target
                     companyName: result.company_name
                 }
             }, function () {
-                const widget = container.parentElement;
-                const header = widget.querySelector('.widget-header');
-                const backButton = widget.querySelector('button');
+                const panelRoot = container.closest('#grantzy-sidepanel') || document;
+                const header = panelRoot.querySelector('.widget-header');
+                const backButton = panelRoot.querySelector('#back-button');
                 container.innerHTML = '';
                 const loader = createLoader();
                 searchInput.disabled = true;
                 container.appendChild(loader);
-                setupDataSearch(searchInput, container, result.uuid, targetElement, function () {
+                setupDataSearch(searchInput, container, result.uuid, contextHolder, function () {
                     loader.remove();
                     header.textContent = `Application selected: ${result.title} | ${result.company_name}`;
                     backButton.style.display = 'block';
@@ -125,15 +125,15 @@ export function updateApplicationResults(container, results, searchInput, target
 
 
 // Remove the event listener attachment from here and attach it only once.
-export function updateResultsContainer(container, data, targetElement, searchInput) {
+export function updateResultsContainer(container, data, contextHolder, searchInput) {
     container.innerHTML = '';
     // Attach the input listener only once.
     if (!searchInput._dataSearchAttached) {
         searchInput.addEventListener('input', function () {
             const query = searchInput.value.toLowerCase().trim();
             // If a specific search context is selected, use that; otherwise, use full data.
-            const dataToSearch = targetElement.searchContextData
-                ? flattenFields(targetElement.searchContextData)
+            const dataToSearch = contextHolder.searchContextData
+                ? flattenFields(contextHolder.searchContextData)
                 : data;
             if (!query) {
                 // If empty, show full results.

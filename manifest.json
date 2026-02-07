@@ -8,36 +8,18 @@
   },
   "permissions": [
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "https://grantzy.com/"
   ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
-  },
-  "content_scripts": [
-    {
-      "css": [
-        "styles/content.css"
-      ],
-      "js": [
-        "dist/bundle.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "img/logo.svg"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ]
+  }
 }

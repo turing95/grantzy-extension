@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "webpack --config webpack.sidepanel.js",
+    "build:sidepanel": "webpack --config webpack.sidepanel.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
