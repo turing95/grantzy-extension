@@ -1,5 +1,11 @@
 const OPEN_EXTENSION_BUTTON_SELECTOR = '[data-open-grantzy-extension]';
 const BUTTON_BUSY_DATA_ATTR = 'extensionBridgeBusy';
+const EXTENSION_READY_EVENT = 'grantzy-extension-ready';
+
+function announceExtensionAvailability() {
+    document.documentElement.dataset.grantzyExtensionInstalled = '1';
+    window.dispatchEvent(new CustomEvent(EXTENSION_READY_EVENT));
+}
 
 function pulseButtonState(button, success) {
     if (!button) {
@@ -55,4 +61,5 @@ function onDocumentClick(event) {
     openSidePanelFromUserClick(button);
 }
 
+announceExtensionAvailability();
 document.addEventListener('click', onDocumentClick, true);
