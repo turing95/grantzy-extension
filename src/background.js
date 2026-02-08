@@ -611,6 +611,30 @@ async function runTabAutofillAction(tabMessage) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'openSidePanelFromWebApp') {
+        const tabId = sender?.tab?.id;
+        if (!tabId) {
+            sendResponse({ success: false, error: 'Cannot open side panel without a tab context.' });
+            return false;
+        }
+
+        if (!chrome.sidePanel?.open) {
+            sendResponse({ success: false, error: 'Side panel is not supported in this browser.' });
+            return false;
+        }
+
+        chrome.sidePanel.open({ tabId }, () => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                return;
+            }
+
+            sendResponse({ success: true });
+        });
+
+        return true;
+    }
+
     async function handleMessage() {
         if (message.action === 'fetchApplications') {
             const query = typeof message.query === 'string' ? message.query.trim() : '';

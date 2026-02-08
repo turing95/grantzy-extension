@@ -23,5 +23,18 @@
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://grantzy.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "src/webappBridge.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
 }

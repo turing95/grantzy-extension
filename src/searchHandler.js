@@ -467,6 +467,9 @@ export function updateApplicationResults(container, results, searchInput, contex
             }, () => {
                 const panelRoot = container.closest('#grantzy-sidepanel') || document;
                 const header = panelRoot.querySelector('.widget-header');
+                const headerContext = panelRoot.querySelector('#widget-context');
+                const applicationsCardTitle = panelRoot.querySelector('#applications-card-title');
+                const applicationsCardSubtitle = panelRoot.querySelector('#applications-card-subtitle');
                 const backButton = panelRoot.querySelector('#back-button');
                 container.innerHTML = '';
                 const loader = createLoader('Loading application data...');
@@ -475,7 +478,22 @@ export function updateApplicationResults(container, results, searchInput, contex
 
                 setupDataSearch(searchInput, container, result.uuid, contextHolder, () => {
                     loader.remove();
-                    header.textContent = `Application selected: ${result.title} | ${result.company_name}`;
+                    if (header) {
+                        header.textContent = 'Grantzy Applications';
+                    }
+                    if (headerContext) {
+                        const title = String(result.title || '').trim() || 'Untitled application';
+                        const company = String(result.company_name || '').trim();
+                        headerContext.textContent = company
+                            ? `Selected application: ${title} • ${company}`
+                            : `Selected application: ${title}`;
+                    }
+                    if (applicationsCardTitle) {
+                        applicationsCardTitle.textContent = 'Application fields';
+                    }
+                    if (applicationsCardSubtitle) {
+                        applicationsCardSubtitle.textContent = 'Search all fields and click any value to copy it.';
+                    }
                     backButton.style.display = 'block';
                     searchInput.disabled = false;
                     searchInput.value = '';

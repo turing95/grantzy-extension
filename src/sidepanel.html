@@ -866,20 +866,609 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* UX readability revamp */
+body {
+  font-size: 15px;
+  line-height: 1.42;
+  color: #12203a;
+}
+
+.grantzy-widget {
+  padding: 10px;
+}
+
+.grantzy-widget .widget-container {
+  grid-template-areas:
+    "topbar"
+    "search"
+    "sidebar"
+    "main";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(120px, auto) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border-color: #cfdceb;
+  background: linear-gradient(180deg, #fcfdff 0%, #f4f8fc 100%);
+  box-shadow: 0 16px 34px rgba(16, 36, 62, 0.14);
+}
+
+.grantzy-widget .widget-container.no-sidebar {
+  grid-template-areas:
+    "topbar"
+    "search"
+    "main";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.grantzy-widget .widget-container.has-selected-application {
+  grid-template-areas:
+    "topbar"
+    "search"
+    "main"
+    "sidebar";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(320px, 1fr) minmax(108px, 170px);
+  align-content: start;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.grantzy-widget .widget-container.has-selected-application.no-sidebar {
+  grid-template-areas:
+    "topbar"
+    "search"
+    "main";
+  grid-template-rows: auto auto minmax(320px, 1fr);
+  align-content: start;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.widget-topbar {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
+  border: 1px solid #d5e2ef;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f2f8fd 100%);
+  padding: 12px;
+  border-bottom-color: #d5e2ef;
+}
+
+.widget-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.grantzy-widget .widget-header {
+  margin: 0;
+  font-size: 1.34rem;
+  line-height: 1.14;
+  letter-spacing: 0;
+  white-space: normal;
+  color: #102846;
+}
+
+.widget-subtitle {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.38;
+  color: #51617b;
+}
+
+.topbar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connection-strip {
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+#connection-status {
+  flex: 1 1 220px;
+  max-width: none;
+  white-space: normal;
+  line-height: 1.35;
+  padding: 8px 10px;
+  border-radius: 11px;
+  font-size: 0.84rem;
+  border-color: #c9d7e7;
+}
+
+#recheck-connection-btn {
+  height: 36px;
+  min-width: 88px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+}
+
+#back-button {
+  position: static;
+  display: none;
+  align-self: flex-start;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  box-shadow: none;
+}
+
+.search-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.view-switcher {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.view-switcher button {
+  min-height: 40px;
+  padding: 9px 8px;
+  font-size: 0.84rem;
+  border-radius: 10px;
+}
+
+#app-search-input {
+  min-height: 44px;
+  padding: 11px 13px;
+  border-radius: 11px;
+  font-size: 1rem;
+}
+
+.grantzy-widget .widget-sidebar {
+  max-height: 230px;
+  padding: 10px;
+  border-radius: 12px;
+  border-color: #d4e1ee;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+}
+
+.widget-container.has-selected-application .widget-sidebar {
+  max-height: 170px;
+}
+
+.grantzy-widget .widget-sidebar .tree-label {
+  padding: 8px 9px;
+}
+
+.grantzy-widget .widget-sidebar .tree-label-text {
+  font-size: 0.86rem;
+}
+
+#main-panel {
+  min-height: 0;
+  gap: 12px;
+}
+
+.panel-view.active {
+  gap: 12px;
+  overflow-y: auto;
+  padding-right: 1px;
+}
+
+#applications-view.panel-view.active {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  gap: 12px;
+}
+
+#applications-data-card {
+  flex: 1 1 auto;
+}
+
+.panel-card {
+  border: 1px solid #d8e4f0;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.panel-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panel-card-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.panel-card-header h3 {
+  margin: 0;
+  font-size: 0.96rem;
+  color: #22354e;
+}
+
+.panel-card-header p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #5a687d;
+}
+
+.panel-header-action {
+  border: 1px solid #bfd5ea;
+  background: #f2f8ff;
+  color: #0f4c83;
+  border-radius: 9px;
+  font-size: 0.77rem;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.panel-header-action:hover {
+  background: #e4f1ff;
+}
+
+#app-search-results {
+  min-height: 160px;
+  max-height: 280px;
+  border-radius: 10px;
+  border-color: #d7e3ef;
+  background: #f8fbff;
+  flex: 1 1 auto;
+}
+
+.grantzy-widget .result-item {
+  margin-bottom: 8px;
+  border: 1px solid #dbe6f1;
+  background: #ffffff;
+}
+
+.result-key {
+  font-size: 0.9rem;
+}
+
+.result-value {
+  white-space: normal;
+  line-height: 1.34;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.result-meta {
+  font-size: 0.73rem;
+}
+
+.state-card,
+.inline-notice {
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+#autofill-panel {
+  padding: 11px;
+  gap: 10px;
+}
+
+.autofill-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.autofill-actions button {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 10px;
+  line-height: 1.2;
+  font-size: 0.86rem;
+  padding: 9px 10px;
+}
+
+#autofill-status {
+  font-size: 0.87rem;
+  line-height: 1.35;
+  border-radius: 9px;
+  padding: 9px 10px;
+}
+
+#autofill-preview {
+  min-height: 140px;
+  max-height: 260px;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+
+.preview-row {
+  background: #fbfdff;
+  border-color: #dce7f1;
+}
+
+#autofill-report {
+  line-height: 1.35;
+  max-height: 120px;
+  background: #fbfdff;
+}
+
+.widget-container.has-selected-application #applications-view.panel-view.active {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.widget-container.has-selected-application #applications-data-card {
+  order: 2;
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+
+.widget-container.has-selected-application #app-search-results {
+  min-height: 170px;
+  max-height: min(52vh, 460px);
+}
+
+.widget-container.has-selected-application #autofill-panel {
+  order: 1;
+  flex: 0 0 auto;
+  min-height: 150px;
+  max-height: min(42vh, 260px);
+  overflow-y: auto;
+}
+
+.widget-container.has-selected-application #autofill-preview {
+  min-height: 100px;
+  max-height: 150px;
+}
+
+.widget-container.has-selected-application #autofill-report {
+  max-height: 90px;
+}
+
+.quick-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.quick-card,
+.settings-card {
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.quick-list,
+.settings-list {
+  max-height: 260px;
+}
+
+.quick-item,
+.settings-token-item {
+  padding: 9px;
+}
+
+.quick-item button,
+.settings-token-item button,
+.inline-actions button {
+  border-radius: 9px;
+  font-size: 0.8rem;
+  padding: 8px 11px;
+}
+
+.settings-form label {
+  gap: 5px;
+  font-size: 0.81rem;
+}
+
+.settings-form input,
+.settings-form select {
+  padding: 9px;
+  font-size: 0.86rem;
+}
+
+.settings-hint,
+.settings-meta,
+.settings-status {
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.toast-message {
+  top: 12px;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(17, 125, 212, 0.5);
+  outline-offset: 1px;
+}
+
+@media (max-width: 520px) {
+  .grantzy-widget .widget-container.has-selected-application {
+    grid-template-rows: auto auto minmax(280px, 1fr) minmax(96px, 150px);
+  }
+
+  .grantzy-widget .widget-container.has-selected-application.no-sidebar {
+    grid-template-rows: auto auto minmax(280px, 1fr);
+  }
+
+  .panel-card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .panel-header-action {
+    width: 100%;
+  }
+
+  .view-switcher {
+    grid-template-columns: 1fr;
+  }
+
+  .autofill-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .widget-container.has-selected-application #applications-data-card {
+    min-height: 190px;
+  }
+
+  .widget-container.has-selected-application #app-search-results {
+    min-height: 150px;
+    max-height: min(44vh, 360px);
+  }
+
+  .widget-container.has-selected-application #autofill-panel {
+    min-height: 140px;
+    max-height: min(38vh, 220px);
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .widget-container.has-selected-application #autofill-panel .panel-card-header p {
+    display: none;
+  }
+
+  .widget-container.has-selected-application .autofill-actions {
+    gap: 6px;
+  }
+
+  .widget-container.has-selected-application .autofill-actions button {
+    min-height: 36px;
+    padding: 8px;
+    font-size: 0.8rem;
+  }
+
+  .widget-container.has-selected-application #autofill-status {
+    padding: 7px 8px;
+    font-size: 0.82rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .widget-container.has-selected-application .autofill-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 980px) {
+  .grantzy-widget .widget-container {
+    grid-template-areas:
+      "topbar topbar"
+      "search search"
+      "sidebar main";
+    grid-template-columns: minmax(220px, 270px) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .grantzy-widget .widget-container.no-sidebar {
+    grid-template-areas:
+      "topbar"
+      "search"
+      "main";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .grantzy-widget .widget-container.has-selected-application {
+    grid-template-areas:
+      "topbar topbar"
+      "search search"
+      "sidebar main";
+    grid-template-columns: minmax(220px, 270px) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .grantzy-widget .widget-container.has-selected-application .widget-sidebar {
+    max-height: none;
+  }
+
+  .widget-topbar {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .topbar-actions {
+    align-items: flex-end;
+  }
+
+  .connection-strip {
+    justify-content: flex-end;
+  }
+
+  .search-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .quick-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #app-search-results {
+    max-height: 340px;
+  }
+
+  .widget-container.has-selected-application #applications-view.panel-view.active {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    overflow: hidden;
+  }
+
+  .widget-container.has-selected-application #applications-data-card {
+    order: 1;
+    flex: 1 1 auto;
+    min-height: 360px;
+  }
+
+  .widget-container.has-selected-application #autofill-panel {
+    order: 2;
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 340px;
+    overflow-y: auto;
+  }
+}
     </style>
 </head>
 <body>
 <div id="grantzy-sidepanel" class="grantzy-widget">
     <div class="widget-container">
         <div class="widget-topbar">
-            <div class="widget-header">Grantzy Applications</div>
-            <div class="connection-strip">
-                <span id="connection-status" class="pending">Checking backend connection...</span>
-                <button id="recheck-connection-btn" type="button">Recheck</button>
+            <div class="widget-title-group">
+                <div class="widget-header">Grantzy Applications</div>
+                <p id="widget-context" class="widget-subtitle">Select an application, then analyze and fill your current form.</p>
+            </div>
+            <div class="topbar-actions">
+                <div class="connection-strip">
+                    <span id="connection-status" class="pending">Checking backend connection...</span>
+                    <button id="recheck-connection-btn" type="button">Recheck</button>
+                </div>
+                <button id="back-button">← Back to Applications</button>
             </div>
         </div>
-
-        <button id="back-button">← Back</button>
 
         <div class="search-row">
             <div class="view-switcher">
@@ -892,18 +1481,31 @@ body {
 
         <div id="main-panel">
             <section id="applications-view" class="panel-view active">
-                <div id="app-search-results" class="results-container"></div>
+                <article id="applications-data-card" class="panel-card">
+                    <header class="panel-card-header">
+                        <div class="panel-card-header-main">
+                            <h3 id="applications-card-title">Application list</h3>
+                            <p id="applications-card-subtitle">Choose one application to load its fields.</p>
+                        </div>
+                        <button id="clear-data-scope-btn" class="panel-header-action" type="button" hidden>Show all fields</button>
+                    </header>
+                    <div id="app-search-results" class="results-container"></div>
+                </article>
 
-                <section id="autofill-panel">
+                <section id="autofill-panel" class="panel-card">
+                    <header class="panel-card-header">
+                        <h3>Autofill assistant</h3>
+                        <p>Analyze the active page, preview mappings, then fill.</p>
+                    </header>
                     <div class="autofill-actions">
                         <button id="analyze-form-btn" type="button">Analyze Current Form</button>
                         <button id="preview-fill-btn" type="button">Preview Fill</button>
                         <button id="apply-fill-btn" type="button">Fill All</button>
                         <button id="undo-fill-btn" type="button">Undo Last Fill</button>
                     </div>
-                    <div id="autofill-status">Select an application and click Fill All.</div>
-                    <div id="autofill-preview"></div>
-                    <div id="autofill-report"></div>
+                    <div id="autofill-status">Select an application to enable Analyze / Fill All.</div>
+                    <div id="autofill-preview" hidden></div>
+                    <div id="autofill-report" hidden></div>
                 </section>
             </section>
 

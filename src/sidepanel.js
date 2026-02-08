@@ -22,6 +22,10 @@ const widgetEl = document.getElementById('grantzy-sidepanel');
 const containerEl = widgetEl.querySelector('.widget-container');
 const mainPanelEl = document.getElementById('main-panel');
 const headerEl = widgetEl.querySelector('.widget-header');
+const headerContextEl = document.getElementById('widget-context');
+const applicationsCardTitleEl = document.getElementById('applications-card-title');
+const applicationsCardSubtitleEl = document.getElementById('applications-card-subtitle');
+const clearDataScopeButton = document.getElementById('clear-data-scope-btn');
 const backButton = document.getElementById('back-button');
 const connectionStatusEl = document.getElementById('connection-status');
 const recheckConnectionBtn = document.getElementById('recheck-connection-btn');
@@ -75,6 +79,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 const RECENT_APPLICATIONS_KEY = 'grantzyRecentApplicationsV1';
 const MAX_RECENT_APPLICATIONS = 8;
+const DEFAULT_HEADER_TITLE = 'Grantzy Applications';
+const DEFAULT_HEADER_CONTEXT = 'Select an application, then analyze and fill your current form.';
+const DEFAULT_APPLICATIONS_CARD_TITLE = 'Application list';
+const DEFAULT_APPLICATIONS_CARD_SUBTITLE = 'Choose one application to load its fields.';
+const SELECTED_APPLICATIONS_CARD_TITLE = 'Application fields';
+const SELECTED_APPLICATIONS_CARD_SUBTITLE = 'Search all fields and click any value to copy it.';
+const AUTOFILL_STATUS_EMPTY_APPLICATION = 'Select an application to enable Analyze / Fill All.';
+const AUTOFILL_STATUS_READY = 'Application loaded. Analyze current form, then Fill All or Preview Fill.';
 
 function sendRuntimeMessage(payload) {
     return new Promise(resolve => {
@@ -356,6 +368,71 @@ function getApplicationSummary(rawApplication) {
     };
 }
 
+function getSelectedApplicationContext(nextApplication) {
+    if (!nextApplication) {
+        return DEFAULT_HEADER_CONTEXT;
+    }
+
+    const title = String(nextApplication.title || '').trim() || 'Untitled application';
+    const company = String(nextApplication.companyName || nextApplication.company_name || '').trim();
+    return company
+        ? `Selected application: ${title} • ${company}`
+        : `Selected application: ${title}`;
+}
+
+function updateWidgetHeader(nextApplication = null) {
+    if (headerEl) {
+        headerEl.textContent = DEFAULT_HEADER_TITLE;
+    }
+    if (headerContextEl) {
+        headerContextEl.textContent = getSelectedApplicationContext(nextApplication);
+    }
+}
+
+function updateApplicationsCardHeader(nextApplication = null) {
+    if (applicationsCardTitleEl) {
+        applicationsCardTitleEl.textContent = nextApplication
+            ? SELECTED_APPLICATIONS_CARD_TITLE
+            : DEFAULT_APPLICATIONS_CARD_TITLE;
+    }
+
+    if (applicationsCardSubtitleEl) {
+        if (!nextApplication) {
+            applicationsCardSubtitleEl.textContent = DEFAULT_APPLICATIONS_CARD_SUBTITLE;
+        } else if (!flatGrantzyFields.length) {
+            applicationsCardSubtitleEl.textContent = 'Loading application fields...';
+        } else if (selectedTreeNodeData) {
+            const scopedFields = flattenFields(selectedTreeNodeData);
+            const scopeName = selectedTreeNodeElement?.querySelector('.tree-label-text')?.textContent?.trim() || 'the selected section';
+            const scopedCount = scopedFields.length;
+            const scopeSuffix = scopeName ? ` from "${scopeName}"` : '';
+            applicationsCardSubtitleEl.textContent = scopedCount
+                ? `Showing ${scopedCount} field${scopedCount === 1 ? '' : 's'}${scopeSuffix}. Click "Show all fields" for the full application.`
+                : `Showing scoped fields${scopeSuffix}. Click "Show all fields" for the full application.`;
+        } else {
+            applicationsCardSubtitleEl.textContent = `${flatGrantzyFields.length} field${flatGrantzyFields.length === 1 ? '' : 's'} loaded. ${SELECTED_APPLICATIONS_CARD_SUBTITLE}`;
+        }
+    }
+
+    if (clearDataScopeButton) {
+        clearDataScopeButton.hidden = !(nextApplication && selectedTreeNodeData);
+    }
+}
+
+function setAutofillIdleStatus() {
+    if (!selectedApplication) {
+        setAutofillStatus(AUTOFILL_STATUS_EMPTY_APPLICATION);
+        return;
+    }
+
+    if (!flatGrantzyFields.length) {
+        setAutofillStatus('Loading application fields...');
+        return;
+    }
+
+    setAutofillStatus(AUTOFILL_STATUS_READY);
+}
+
 function applyViewVisibility() {
     const isApplicationsView = currentView === 'applications';
     applicationsViewEl?.classList.toggle('active', isApplicationsView);
@@ -446,7 +523,7 @@ async function selectApplication(rawApplication, { focusSearch = true } = {}) {
         setupDataSearch(searchInput, resultsContainer, summary.uuid, widgetEl, () => resolve());
     });
 
-    headerEl.textContent = `Application selected: ${summary.title} | ${summary.companyName}`;
+    updateWidgetHeader(summary);
     backButton.style.display = 'block';
     searchInput.disabled = false;
     searchInput.value = '';
@@ -905,11 +982,10 @@ function applyManualMapping(item, selectedKey) {
 
 function renderFillPlan() {
     autofillPreviewEl.innerHTML = '';
+    autofillPreviewEl.hidden = false;
 
     if (!currentFillPlan.length) {
-        const empty = document.createElement('div');
-        empty.textContent = 'No fill plan yet. Click Fill All for one-click autofill, or Preview Fill to review first.';
-        autofillPreviewEl.appendChild(empty);
+        autofillPreviewEl.hidden = true;
         updateActionButtons();
         return;
     }
@@ -997,9 +1073,10 @@ function renderFillPlan() {
 
 function renderFillReport(results = []) {
     autofillReportEl.innerHTML = '';
+    autofillReportEl.hidden = false;
 
     if (!results.length) {
-        autofillReportEl.textContent = 'No fill report yet.';
+        autofillReportEl.hidden = true;
         return;
     }
 
@@ -1037,7 +1114,9 @@ function resetAutofillState() {
     latestScan = null;
     currentFillPlan = [];
     autofillReportEl.textContent = '';
-    autofillPreviewEl.textContent = 'No fill plan yet. Click Fill All for one-click autofill, or Preview Fill to review first.';
+    autofillReportEl.hidden = true;
+    autofillPreviewEl.textContent = '';
+    autofillPreviewEl.hidden = true;
     updateActionButtons();
 }
 
@@ -1053,6 +1132,7 @@ async function refreshFlatGrantzyFields() {
         flatGrantzyFields = [];
     }
 
+    updateApplicationsCardHeader(selectedApplication);
     updateActionButtons();
     applyViewVisibility();
 }
@@ -1385,6 +1465,7 @@ function setSelectedTreeNode(data, liElement) {
     widgetEl.searchContextData = data;
     triggerSearchForSelectedNode();
     highlightSelectedRootNode();
+    updateApplicationsCardHeader(selectedApplication);
 }
 
 function highlightSelectedRootNode() {
@@ -1414,8 +1495,13 @@ function clearSelectedTreeNode() {
         selectedTreeNodeElement = null;
     }
 
+    if (sidebarEl) {
+        sidebarEl.querySelectorAll('li').forEach(node => node.classList.remove('selected-root'));
+    }
+
     selectedTreeNodeData = null;
     widgetEl.searchContextData = null;
+    updateApplicationsCardHeader(selectedApplication);
 }
 
 function triggerSearchForSelectedNode() {
@@ -1428,8 +1514,35 @@ function triggerSearchForSelectedNode() {
     resultsSelection(resultsContainer, searchInput);
 }
 
+function clearDataScope({ focusSearch = false } = {}) {
+    if (!selectedApplication) {
+        return;
+    }
+
+    clearSelectedTreeNode();
+
+    if (flatGrantzyFields.length) {
+        updateDataResults(resultsContainer, flatGrantzyFields);
+        resultsSelection(resultsContainer, searchInput);
+    }
+
+    if (focusSearch) {
+        searchInput.focus();
+    }
+}
+
 function updateSidebar(nextSelectedApplication) {
+    const previousApplicationUuid = selectedApplication?.uuid || null;
     selectedApplication = nextSelectedApplication || null;
+    const nextApplicationUuid = selectedApplication?.uuid || null;
+    const applicationChanged = previousApplicationUuid !== nextApplicationUuid;
+
+    if (applicationChanged) {
+        clearSelectedTreeNode();
+    }
+
+    containerEl.classList.toggle('has-selected-application', Boolean(selectedApplication));
+    updateApplicationsCardHeader(selectedApplication);
 
     if (selectedApplication) {
         containerEl.classList.remove('no-sidebar');
@@ -1458,7 +1571,7 @@ function updateSidebar(nextSelectedApplication) {
             }
         });
 
-        headerEl.textContent = `Application: ${selectedApplication.title}`;
+        updateWidgetHeader(selectedApplication);
         backButton.style.display = 'block';
     } else {
         if (sidebarEl) {
@@ -1468,12 +1581,15 @@ function updateSidebar(nextSelectedApplication) {
 
         clearSelectedTreeNode();
         containerEl.classList.add('no-sidebar');
-        headerEl.textContent = 'Grantzy Applications';
+        updateWidgetHeader(null);
         backButton.style.display = 'none';
     }
 
     updateActionButtons();
     applyViewVisibility();
+    if (!isBusy && !latestScan && !currentFillPlan.length) {
+        setAutofillIdleStatus();
+    }
 }
 
 async function saveSettingsFromForm() {
@@ -1629,6 +1745,9 @@ undoFillButton.addEventListener('click', undoLastFill);
 applicationsViewButton?.addEventListener('click', () => {
     setActiveView('applications');
 });
+clearDataScopeButton?.addEventListener('click', () => {
+    clearDataScope({ focusSearch: true });
+});
 quickAccessViewButton?.addEventListener('click', () => {
     setActiveView('quick_access');
 });
@@ -1672,7 +1791,7 @@ backButton.addEventListener('click', () => {
         updateSidebar(null);
         await refreshFlatGrantzyFields();
         resetAutofillState();
-        setAutofillStatus('Select an application and click Fill All.');
+        setAutofillIdleStatus();
 
         resultsContainer.innerHTML = '';
         searchInput.disabled = false;
@@ -1689,8 +1808,15 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
     }
 
     if (changes.selectedApplication) {
+        const previousApplicationUuid = selectedApplication?.uuid || null;
         const nextApplication = changes.selectedApplication.newValue || null;
         updateSidebar(nextApplication);
+        const nextApplicationUuid = nextApplication?.uuid || null;
+        if (previousApplicationUuid !== nextApplicationUuid) {
+            flatGrantzyFields = [];
+            resetAutofillState();
+            setAutofillIdleStatus();
+        }
         if (nextApplication) {
             await recordRecentApplication(nextApplication);
             await renderRecentApplicationsList();
@@ -1701,6 +1827,9 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
         await refreshFlatGrantzyFields();
         chrome.storage.local.get('selectedApplication', data => {
             updateSidebar(data.selectedApplication);
+            if (!latestScan && !currentFillPlan.length && !isBusy) {
+                setAutofillIdleStatus();
+            }
         });
     }
 
@@ -1713,7 +1842,7 @@ chrome.storage.local.get('selectedApplication', async data => {
     updateSidebar(data.selectedApplication);
     await refreshFlatGrantzyFields();
     resetAutofillState();
-    setAutofillStatus('Select an application and click Fill All.');
+    setAutofillIdleStatus();
     await refreshSettingsPanel();
     await setupApplicationsViewSearch();
     await setActiveView('applications');
