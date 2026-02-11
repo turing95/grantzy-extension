@@ -5,6 +5,7 @@ import {
     normalizeString,
     normalizeTokens
 } from './utils.js';
+import { t } from './i18n.js';
 
 const APPLICATION_SEARCH_LIMIT = 40;
 
@@ -19,7 +20,7 @@ function sendRuntimeMessage(payload) {
                 return;
             }
 
-            resolve(response || { success: false, error: 'No response from background' });
+            resolve(response || { success: false, error: t('no_response_from_background') });
         });
     });
 }
@@ -48,22 +49,22 @@ function describeApplicationTimestamp(isoTimestamp) {
 
     const delta = date.getTime() - Date.now();
     const absMilliseconds = Math.abs(delta);
-    const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+    const rtf = new Intl.RelativeTimeFormat('it', { numeric: 'auto' });
 
     if (absMilliseconds < 60_000) {
-        return 'updated just now';
+        return t('updated_just_now');
     }
     if (absMilliseconds < 3_600_000) {
-        return `updated ${rtf.format(Math.round(delta / 60_000), 'minute')}`;
+        return t('updated_relative', { relative: rtf.format(Math.round(delta / 60_000), 'minute') });
     }
     if (absMilliseconds < 86_400_000) {
-        return `updated ${rtf.format(Math.round(delta / 3_600_000), 'hour')}`;
+        return t('updated_relative', { relative: rtf.format(Math.round(delta / 3_600_000), 'hour') });
     }
     if (absMilliseconds < 2_592_000_000) {
-        return `updated ${rtf.format(Math.round(delta / 86_400_000), 'day')}`;
+        return t('updated_relative', { relative: rtf.format(Math.round(delta / 86_400_000), 'day') });
     }
 
-    return `updated ${rtf.format(Math.round(delta / 2_592_000_000), 'month')}`;
+    return t('updated_relative', { relative: rtf.format(Math.round(delta / 2_592_000_000), 'month') });
 }
 
 function formatDataValue(value) {
@@ -187,7 +188,7 @@ function showNoResults(container, message) {
 function showErrorState(container, message, onRetry) {
     renderStateCard(container, message, {
         tone: 'error',
-        actionLabel: 'Retry',
+        actionLabel: t('retry'),
         onAction: onRetry
     });
 }
@@ -199,7 +200,7 @@ function setLoadMoreBusy(container, isBusy) {
     }
 
     loadMoreButton.disabled = isBusy;
-    loadMoreButton.textContent = isBusy ? 'Loading more...' : 'Load more applications';
+    loadMoreButton.textContent = isBusy ? t('loading_more') : t('load_more_applications');
 }
 
 function rankApplications(query, sourceApplications) {
@@ -248,7 +249,7 @@ export async function fetchApplications({
     }
 
     if (!response.success) {
-        throw new Error(response.error || 'Could not fetch applications');
+        throw new Error(response.error || t('could_not_fetch_applications'));
     }
 
     const batch = Array.isArray(response.applications) ? response.applications : [];
@@ -267,7 +268,7 @@ export async function fetchApplications({
 }
 
 export function setupApplicationSearch(searchInput, resultsContainer, contextHolder, callback) {
-    searchInput.placeholder = 'Search applications...';
+    searchInput.placeholder = t('search_applications');
 
     if (searchInput._applicationSearchListener) {
         searchInput.removeEventListener('input', searchInput._applicationSearchListener);
@@ -293,7 +294,7 @@ export function setupApplicationSearch(searchInput, resultsContainer, contextHol
             nextCursor = 0;
             mergedResults = [];
             resultsContainer.innerHTML = '';
-            const loader = createLoader(currentQuery ? 'Searching applications...' : 'Loading recent applications...');
+            const loader = createLoader(currentQuery ? t('searching_applications') : t('loading_recent_applications'));
             resultsContainer.appendChild(loader);
         } else if (loadingMore || nextCursor === null) {
             return;
@@ -325,7 +326,7 @@ export function setupApplicationSearch(searchInput, resultsContainer, contextHol
             if (!mergedResults.length) {
                 showNoResults(
                     resultsContainer,
-                    currentQuery ? 'No applications match your search.' : 'No applications available for this account.'
+                    currentQuery ? t('no_applications_match_search') : t('no_applications_available_for_account')
                 );
                 return;
             }
@@ -337,7 +338,7 @@ export function setupApplicationSearch(searchInput, resultsContainer, contextHol
             });
             resultsSelection(resultsContainer, searchInput);
         } catch (error) {
-            const errorMessage = error.message || 'Could not load applications.';
+            const errorMessage = error.message || t('could_not_load_applications');
 
             if (!append && cachedApplications.length && currentQuery) {
                 const fallback = rankApplications(currentQuery, cachedApplications).slice(0, APPLICATION_SEARCH_LIMIT);
@@ -345,7 +346,7 @@ export function setupApplicationSearch(searchInput, resultsContainer, contextHol
                     updateApplicationResults(resultsContainer, fallback, searchInput, contextHolder, {
                         hasMore: false
                     });
-                    appendInlineNotice(resultsContainer, 'Showing cached results. Connection may be unstable.', 'Retry', () => {
+                    appendInlineNotice(resultsContainer, t('showing_cached_results_connection_unstable'), t('retry'), () => {
                         runSearch({ append: false });
                     });
                     resultsSelection(resultsContainer, searchInput);
@@ -389,17 +390,17 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, co
 
     searchInput._dataSearchAttached = false;
     contextHolder.searchContextData = null;
-    searchInput.placeholder = 'Search data...';
+    searchInput.placeholder = t('search_data');
 
     resultsContainer.innerHTML = '';
-    resultsContainer.appendChild(createLoader('Loading application data...'));
+    resultsContainer.appendChild(createLoader(t('loading_application_data')));
 
     chrome.runtime.sendMessage({ action: 'fetchApplicationData', applicationId }, response => {
         if (chrome.runtime.lastError) {
             console.error('Message Error:', chrome.runtime.lastError);
             showErrorState(
                 resultsContainer,
-                chrome.runtime.lastError.message || 'Could not load application data.',
+                chrome.runtime.lastError.message || t('could_not_load_application_data'),
                 () => setupDataSearch(searchInput, resultsContainer, applicationId, contextHolder, callback)
             );
             if (callback) callback();
@@ -409,7 +410,7 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, co
         if (!response?.success) {
             showErrorState(
                 resultsContainer,
-                response?.error || 'Could not load application data.',
+                response?.error || t('could_not_load_application_data'),
                 () => setupDataSearch(searchInput, resultsContainer, applicationId, contextHolder, callback)
             );
             if (callback) callback();
@@ -443,7 +444,7 @@ export function updateApplicationResults(container, results, searchInput, contex
     container.innerHTML = '';
 
     if (!results.length) {
-        showNoResults(container, 'No applications found.');
+        showNoResults(container, t('no_applications_found'));
         return;
     }
 
@@ -452,8 +453,8 @@ export function updateApplicationResults(container, results, searchInput, contex
             .filter(Boolean)
             .join(' • ');
 
-        const resultItem = createResultItem(result.title || 'Untitled application', details, {
-            metadata: 'Open application data'
+        const resultItem = createResultItem(result.title || t('untitled_application'), details, {
+            metadata: t('open_application_data')
         });
 
         resultItem.addEventListener('click', () => {
@@ -472,27 +473,27 @@ export function updateApplicationResults(container, results, searchInput, contex
                 const applicationsCardSubtitle = panelRoot.querySelector('#applications-card-subtitle');
                 const backButton = panelRoot.querySelector('#back-button');
                 container.innerHTML = '';
-                const loader = createLoader('Loading application data...');
+                const loader = createLoader(t('loading_application_data'));
                 searchInput.disabled = true;
                 container.appendChild(loader);
 
                 setupDataSearch(searchInput, container, result.uuid, contextHolder, () => {
                     loader.remove();
                     if (header) {
-                        header.textContent = 'Grantzy Applications';
+                        header.textContent = t('grantzy_applications');
                     }
                     if (headerContext) {
-                        const title = String(result.title || '').trim() || 'Untitled application';
+                        const title = String(result.title || '').trim() || t('untitled_application');
                         const company = String(result.company_name || '').trim();
                         headerContext.textContent = company
-                            ? `Selected application: ${title} • ${company}`
-                            : `Selected application: ${title}`;
+                            ? t('selected_application_title_company', { title, company })
+                            : t('selected_application_title', { title });
                     }
                     if (applicationsCardTitle) {
-                        applicationsCardTitle.textContent = 'Application fields';
+                        applicationsCardTitle.textContent = t('application_fields');
                     }
                     if (applicationsCardSubtitle) {
-                        applicationsCardSubtitle.textContent = 'Search all fields and click any value to copy it.';
+                        applicationsCardSubtitle.textContent = t('search_all_fields_and_click_value_to_copy');
                     }
                     backButton.style.display = 'block';
                     searchInput.disabled = false;
@@ -518,7 +519,7 @@ export function updateApplicationResults(container, results, searchInput, contex
         loadMoreButton.type = 'button';
         loadMoreButton.className = 'result-pagination-btn';
         loadMoreButton.dataset.role = 'load-more-applications';
-        loadMoreButton.textContent = 'Load more applications';
+        loadMoreButton.textContent = t('load_more_applications');
         loadMoreButton.addEventListener('click', onLoadMore);
 
         pagination.appendChild(loadMoreButton);
@@ -590,7 +591,7 @@ export function updateDataResults(container, results) {
         : [];
 
     if (!normalizedResults.length) {
-        showNoResults(container, 'No values found for this search.');
+        showNoResults(container, t('no_values_found_for_search'));
         return;
     }
 
@@ -598,17 +599,17 @@ export function updateDataResults(container, results) {
         const resultValue = formatDataValue(result.value);
         const displayValue = compactDisplayValue(resultValue);
         const resultItem = createResultItem(result.key, resultValue, {
-            metadata: 'Click to copy value',
+            metadata: t('click_to_copy_value'),
             displayValue
         });
 
         resultItem.addEventListener('click', async () => {
             try {
                 await copyToClipboard(resultValue);
-                showToast('Copied to clipboard');
+                showToast(t('copied_to_clipboard'));
             } catch (error) {
                 console.error('Failed to copy text:', error);
-                showToast('Copy failed');
+                showToast(t('copy_failed'));
             }
         });
 
@@ -660,7 +661,7 @@ export function createResultItem(key, value, options = {}) {
     return resultItem;
 }
 
-export function createLoader(text = 'Loading data...') {
+export function createLoader(text = t('loading_data')) {
     const loader = document.createElement('div');
     loader.classList.add('loader');
 

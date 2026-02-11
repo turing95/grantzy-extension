@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Grantzy fill form",
-  "version": "1.0",
-  "description": "Fill forms with Grantzy data",
+  "name": "Grantzy form assistant",
+  "version": "2.0",
+  "description": "Assistente che ti aiuta a completare form web",
   "side_panel": {
     "default_path": "src/sidepanel.html"
   },

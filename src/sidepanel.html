@@ -1,10 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="it">
 <head>
     <meta charset="UTF-8"/>
     <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Grantzy Application Sidepanel</title>
+    <title>Pannello Pratiche Grantzy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap" rel="stylesheet">
     <script type="module" src="../dist/sidepanel.js"></script>
     <style>
 :root {
@@ -1451,6 +1454,140 @@ select:focus-visible {
     overflow-y: auto;
   }
 }
+
+/* Grantzy design system alignment */
+:root {
+  --bg-a: #f7f9fc;
+  --bg-b: #f0f4fa;
+  --panel: #ffffff;
+  --panel-border: #c7d2f3;
+  --panel-shadow: 0 4px 12px rgba(30, 56, 136, 0.08);
+  --text-main: #182e6e;
+  --text-muted: #5778da;
+  --brand: #1e3888;
+  --brand-strong: #122253;
+  --danger-bg: #febac6;
+  --danger-text: #9a031e;
+  --neutral-bg: #e7f2ec;
+  --neutral-text: #182e6e;
+  --ok-bg: #e7f2ec;
+  --ok-text: #182a1f;
+  --pending-bg: #fefae0;
+  --pending-text: #453c01;
+}
+
+body {
+  background: var(--bg-a);
+  font-family: Lato, sans-serif;
+}
+
+.grantzy-widget .widget-container {
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--panel-shadow);
+}
+
+.widget-topbar {
+  background: #f7f9fc;
+  border-radius: 8px;
+}
+
+.grantzy-widget .widget-header {
+  font-family: inherit;
+}
+
+.grantzy-widget .widget-sidebar {
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.grantzy-widget .widget-sidebar .tree-label:hover {
+  background: rgba(30, 56, 136, 0.08);
+}
+
+.grantzy-widget .widget-sidebar li.selected > .tree-label {
+  background: rgba(30, 56, 136, 0.14);
+}
+
+.grantzy-widget .widget-sidebar li.selected-root > .tree-label {
+  border-color: #c7d2f3;
+  background: rgba(30, 56, 136, 0.14);
+}
+
+#back-button {
+  background: var(--brand);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+#back-button:hover {
+  background: var(--brand-strong);
+  filter: none;
+}
+
+#app-search-input {
+  border-radius: 8px;
+}
+
+#app-search-results {
+  background: #ffffff;
+}
+
+.grantzy-widget .result-item {
+  border-radius: 6px;
+}
+
+.grantzy-widget .result-item:hover,
+.grantzy-widget .result-item.hovered {
+  border-color: #c7d2f3;
+}
+
+.state-card,
+.state-action,
+.inline-notice-action,
+.autofill-actions button,
+.inline-actions button,
+.quick-item button,
+.view-switcher button,
+.result-pagination-btn,
+#recheck-connection-btn,
+.panel-header-action {
+  border-radius: 6px;
+}
+
+#autofill-panel {
+  background: #ffffff;
+}
+
+.autofill-actions button,
+.inline-actions button,
+.quick-item button {
+  background: var(--brand);
+}
+
+.autofill-actions button:hover,
+.inline-actions button:hover,
+.quick-item button:hover {
+  background: var(--brand-strong);
+  filter: none;
+}
+
+#recheck-connection-btn,
+.panel-header-action {
+  border: 1px solid var(--panel-border);
+  background: #ffffff;
+  color: var(--brand);
+}
+
+#recheck-connection-btn:hover,
+.panel-header-action:hover {
+  background: #f7f9fc;
+}
+
+.quick-card,
+.settings-card {
+  border-radius: 8px;
+}
     </style>
 </head>
 <body>
@@ -1458,25 +1595,25 @@ select:focus-visible {
     <div class="widget-container">
         <div class="widget-topbar">
             <div class="widget-title-group">
-                <div class="widget-header">Grantzy Applications</div>
-                <p id="widget-context" class="widget-subtitle">Select an application, then analyze and fill your current form.</p>
+                <div class="widget-header">Pratiche Grantzy</div>
+                <p id="widget-context" class="widget-subtitle">Seleziona una pratica, poi analizza e compila il modulo corrente.</p>
             </div>
             <div class="topbar-actions">
                 <div class="connection-strip">
-                    <span id="connection-status" class="pending">Checking backend connection...</span>
-                    <button id="recheck-connection-btn" type="button">Recheck</button>
+                    <span id="connection-status" class="pending">Verifica connessione al server...</span>
+                    <button id="recheck-connection-btn" type="button">Ricontrolla</button>
                 </div>
-                <button id="back-button">← Back to Applications</button>
+                <button id="back-button">← Torna alle Pratiche</button>
             </div>
         </div>
 
         <div class="search-row">
             <div class="view-switcher">
-                <button id="show-applications-view-btn" type="button" class="active">Applications</button>
-                <button id="show-quick-access-view-btn" type="button">Quick Access</button>
-                <button id="show-settings-view-btn" type="button">Settings</button>
+                <button id="show-applications-view-btn" type="button" class="active">Pratiche</button>
+                <button id="show-quick-access-view-btn" type="button">Accesso Rapido</button>
+                <button id="show-settings-view-btn" type="button">Impostazioni</button>
             </div>
-            <input type="text" id="app-search-input" placeholder="Search applications..."/>
+            <input type="text" id="app-search-input" placeholder="Cerca pratiche..."/>
         </div>
 
         <div id="main-panel">
@@ -1484,26 +1621,26 @@ select:focus-visible {
                 <article id="applications-data-card" class="panel-card">
                     <header class="panel-card-header">
                         <div class="panel-card-header-main">
-                            <h3 id="applications-card-title">Application list</h3>
-                            <p id="applications-card-subtitle">Choose one application to load its fields.</p>
+                            <h3 id="applications-card-title">Lista pratiche</h3>
+                            <p id="applications-card-subtitle">Scegli una pratica per caricarne i campi.</p>
                         </div>
-                        <button id="clear-data-scope-btn" class="panel-header-action" type="button" hidden>Show all fields</button>
+                        <button id="clear-data-scope-btn" class="panel-header-action" type="button" hidden>Mostra tutti i campi</button>
                     </header>
                     <div id="app-search-results" class="results-container"></div>
                 </article>
 
                 <section id="autofill-panel" class="panel-card">
                     <header class="panel-card-header">
-                        <h3>Autofill assistant</h3>
-                        <p>Analyze the active page, preview mappings, then fill.</p>
+                        <h3>Assistente compilazione</h3>
+                        <p>Analizza la pagina attiva, anteprima mappature, poi compila.</p>
                     </header>
                     <div class="autofill-actions">
-                        <button id="analyze-form-btn" type="button">Analyze Current Form</button>
-                        <button id="preview-fill-btn" type="button">Preview Fill</button>
-                        <button id="apply-fill-btn" type="button">Fill All</button>
-                        <button id="undo-fill-btn" type="button">Undo Last Fill</button>
+                        <button id="analyze-form-btn" type="button">Analizza Modulo</button>
+                        <button id="preview-fill-btn" type="button">Anteprima</button>
+                        <button id="apply-fill-btn" type="button">Compila Tutto</button>
+                        <button id="undo-fill-btn" type="button">Annulla Compilazione</button>
                     </div>
-                    <div id="autofill-status">Select an application to enable Analyze / Fill All.</div>
+                    <div id="autofill-status">Seleziona una pratica per abilitare Analizza / Compila Tutto.</div>
                     <div id="autofill-preview" hidden></div>
                     <div id="autofill-report" hidden></div>
                 </section>
@@ -1512,12 +1649,12 @@ select:focus-visible {
             <section id="quick-access-view" class="panel-view">
                 <div class="quick-grid">
                     <article class="quick-card">
-                        <h3>Recent Applications</h3>
+                        <h3>Pratiche recenti</h3>
                         <div id="recent-applications-list" class="quick-list"></div>
                     </article>
 
                     <article class="quick-card">
-                        <h3>Last Used Form Mappings</h3>
+                        <h3>Ultime Mappature Modulo</h3>
                         <div id="recent-mappings-list" class="quick-list"></div>
                     </article>
                 </div>
@@ -1525,63 +1662,24 @@ select:focus-visible {
 
             <section id="settings-view" class="panel-view">
                 <article class="settings-card">
-                    <h3>Extension Authentication</h3>
-                    <div id="settings-status" class="settings-status">Configure token/session mode for API access.</div>
-                    <div class="settings-form">
-                        <label for="settings-credentials-mode">
-                            Credentials Mode
-                            <select id="settings-credentials-mode">
-                                <option value="omit">Bearer Token (recommended)</option>
-                                <option value="include">Use Grantzy Session Cookies</option>
-                            </select>
-                        </label>
-
-                        <label for="settings-token-input">
-                            API Token
-                            <input id="settings-token-input" type="password" placeholder="grx_..." autocomplete="off"/>
-                        </label>
-
-                        <div class="inline-actions">
-                            <button id="save-settings-btn" type="button">Save Settings</button>
-                            <button id="clear-token-btn" type="button">Clear Token</button>
-                            <button id="validate-settings-btn" type="button">Validate Connection</button>
-                        </div>
-
-                        <div class="settings-hint">
-                            Session mode lets you issue/revoke tokens using your current login on the configured API host. Token mode avoids relying on browser cookies.
+                    <h3>Stato connessione</h3>
+                    <div id="settings-connection-info" class="settings-status">Verifica connessione...</div>
+                    <div id="settings-connected-details" style="display:none;">
+                        <div class="settings-meta" style="margin-top:8px;">
+                            Connesso come <strong id="settings-user-display"></strong>
                         </div>
                     </div>
-                </article>
 
-                <article class="settings-card">
-                    <h3>Token Lifecycle</h3>
-                    <div class="settings-form">
-                        <label for="settings-token-name-input">
-                            Token Name
-                            <input id="settings-token-name-input" type="text" placeholder="Grantzy Chrome Extension"/>
-                        </label>
-
-                        <label for="settings-token-expiry-select">
-                            Expiry
-                            <select id="settings-token-expiry-select">
-                                <option value="30">30 days</option>
-                                <option value="60">60 days</option>
-                                <option value="90" selected>90 days</option>
-                                <option value="180">180 days</option>
-                                <option value="365">365 days</option>
-                            </select>
-                        </label>
-
-                        <div class="inline-actions">
-                            <button id="issue-token-btn" type="button">Issue New Token</button>
-                            <button id="rotate-token-btn" type="button">Rotate Current Token</button>
-                            <button id="revoke-token-btn" type="button">Revoke Current Token</button>
+                    <div id="settings-not-connected-prompt" style="display:none; margin-top:10px;">
+                        <div class="state-card state-neutral">
+                            Connetti questa estensione dalle impostazioni del tuo account Grantzy.
                         </div>
-
-                        <div id="settings-token-meta" class="settings-meta">No managed token yet.</div>
                     </div>
 
-                    <div id="settings-token-list" class="settings-list"></div>
+                    <div class="inline-actions" style="margin-top:10px;">
+                        <button id="settings-manage-btn" type="button">Gestisci in Grantzy</button>
+                        <button id="settings-disconnect-btn" type="button">Disconnetti</button>
+                    </div>
                 </article>
             </section>
         </div>

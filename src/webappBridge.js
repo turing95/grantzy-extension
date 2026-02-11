@@ -61,5 +61,85 @@ function onDocumentClick(event) {
     openSidePanelFromUserClick(button);
 }
 
+function isGrantzyOrigin(origin) {
+    try {
+        const url = new URL(origin);
+        return url.hostname === location.hostname;
+    } catch (_error) {
+        return false;
+    }
+}
+
+function handleWindowMessage(event) {
+    if (!event.data || typeof event.data !== 'object') {
+        return;
+    }
+
+    if (!isGrantzyOrigin(event.origin)) {
+        return;
+    }
+
+    const { type } = event.data;
+
+    if (type === 'grantzy-extension-connect') {
+        const { token, tokenMeta } = event.data;
+        if (!token) {
+            window.postMessage({ type: 'grantzy-extension-connect-result', success: false, error: 'No token provided' }, event.origin);
+            return;
+        }
+
+        chrome.runtime.sendMessage({
+            action: 'saveExtensionSettings',
+            apiToken: token,
+            credentialsMode: 'omit',
+            tokenMeta: tokenMeta || null
+        }, response => {
+            const success = !chrome.runtime.lastError && Boolean(response?.success);
+            window.postMessage({
+                type: 'grantzy-extension-connect-result',
+                success,
+                error: success ? null : (response?.error || chrome.runtime.lastError?.message || 'Unknown error')
+            }, event.origin);
+        });
+        return;
+    }
+
+    if (type === 'grantzy-extension-disconnect') {
+        chrome.runtime.sendMessage({ action: 'clearExtensionToken' }, response => {
+            const success = !chrome.runtime.lastError && Boolean(response?.success);
+            window.postMessage({
+                type: 'grantzy-extension-disconnect-result',
+                success,
+                error: success ? null : (response?.error || chrome.runtime.lastError?.message || 'Unknown error')
+            }, event.origin);
+        });
+        return;
+    }
+
+    if (type === 'grantzy-extension-status-request') {
+        chrome.runtime.sendMessage({ action: 'getExtensionSession' }, response => {
+            if (chrome.runtime.lastError || !response?.success) {
+                window.postMessage({
+                    type: 'grantzy-extension-status',
+                    connected: false,
+                    user: null,
+                    error: response?.error || chrome.runtime.lastError?.message || null
+                }, event.origin);
+                return;
+            }
+
+            const session = response.session || {};
+            const user = session.user || null;
+            window.postMessage({
+                type: 'grantzy-extension-status',
+                connected: true,
+                user: user ? { name: user.name, email: user.email } : null
+            }, event.origin);
+        });
+        return;
+    }
+}
+
 announceExtensionAvailability();
 document.addEventListener('click', onDocumentClick, true);
+window.addEventListener('message', handleWindowMessage, false);
