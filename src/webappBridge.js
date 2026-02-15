@@ -1,6 +1,12 @@
 const OPEN_EXTENSION_BUTTON_SELECTOR = '[data-open-grantzy-extension]';
 const BUTTON_BUSY_DATA_ATTR = 'extensionBridgeBusy';
 const EXTENSION_READY_EVENT = 'grantzy-extension-ready';
+const USER_GESTURE_ERROR_PATTERN = /(user gesture|gesture required|may only be called.*gesture)/i;
+const SPACE_PATH_PATTERN = /\/spaces\/([0-9a-fA-F-]{36})(?:\/|$)/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+let pendingOpenRetryPayload = null;
+let retryListenersAttached = false;
 
 function announceExtensionAvailability() {
     document.documentElement.dataset.grantzyExtensionInstalled = '1';
@@ -38,14 +44,132 @@ function setButtonBusy(button, isBusy) {
     button.disabled = isBusy;
 }
 
+function normalizeUuid(value) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return UUID_PATTERN.test(normalized) ? normalized : '';
+}
+
+function resolveSpaceUuidFromPathname(pathname) {
+    const match = String(pathname || '').match(SPACE_PATH_PATTERN);
+    return normalizeUuid(match?.[1]);
+}
+
+function resolveSpaceUuidFromSidebar() {
+    const rightSidebar = document.querySelector('#right-sidebar[data-space-uuid]');
+    if (!rightSidebar) {
+        return '';
+    }
+
+    return normalizeUuid(
+        rightSidebar.dataset?.spaceUuid ||
+        rightSidebar.getAttribute('data-space-uuid')
+    );
+}
+
+function resolveCurrentSpaceUuid() {
+    return resolveSpaceUuidFromPathname(window.location.pathname) || resolveSpaceUuidFromSidebar();
+}
+
+function buildOpenSidePanelPayload() {
+    const payload = {
+        action: 'openSidePanelFromWebApp',
+        pageUrl: window.location.href
+    };
+    const spaceUuid = resolveCurrentSpaceUuid();
+    if (spaceUuid) {
+        payload.spaceUuid = spaceUuid;
+    }
+    return payload;
+}
+
+function isGestureRelatedOpenFailure(response, runtimeError) {
+    if (response?.requiresUserGesture) {
+        return true;
+    }
+
+    const message = String(runtimeError?.message || response?.error || '');
+    return USER_GESTURE_ERROR_PATTERN.test(message);
+}
+
+function sendOpenSidePanelMessage(payload, callback) {
+    chrome.runtime.sendMessage(payload, response => {
+        const runtimeError = chrome.runtime.lastError;
+        callback({
+            success: !runtimeError && Boolean(response?.success),
+            response: response || null,
+            runtimeError: runtimeError || null
+        });
+    });
+}
+
+function detachRetryListeners() {
+    if (!retryListenersAttached) {
+        return;
+    }
+
+    retryListenersAttached = false;
+    window.removeEventListener('pointerdown', onQueuedRetryGesture, true);
+    window.removeEventListener('keydown', onQueuedRetryGesture, true);
+}
+
+function clearQueuedOpenRetry() {
+    pendingOpenRetryPayload = null;
+    detachRetryListeners();
+}
+
+function flushQueuedOpenRetry() {
+    const payload = pendingOpenRetryPayload;
+    if (!payload) {
+        detachRetryListeners();
+        return;
+    }
+
+    clearQueuedOpenRetry();
+    sendOpenSidePanelMessage(payload, ({ success, response, runtimeError }) => {
+        if (success) {
+            return;
+        }
+
+        const errorMessage = String(runtimeError?.message || response?.error || 'Unknown error');
+        console.warn('Grantzy extension queued side panel retry failed:', errorMessage);
+    });
+}
+
+function onQueuedRetryGesture() {
+    flushQueuedOpenRetry();
+}
+
+function queueOpenRetry(payload) {
+    pendingOpenRetryPayload = payload;
+    if (retryListenersAttached) {
+        return;
+    }
+
+    retryListenersAttached = true;
+    window.addEventListener('pointerdown', onQueuedRetryGesture, true);
+    window.addEventListener('keydown', onQueuedRetryGesture, true);
+}
+
 function openSidePanelFromUserClick(button) {
     if (!button || button.dataset[BUTTON_BUSY_DATA_ATTR] === '1') {
         return;
     }
 
+    const payload = buildOpenSidePanelPayload();
     setButtonBusy(button, true);
-    chrome.runtime.sendMessage({ action: 'openSidePanelFromWebApp' }, response => {
-        const success = !chrome.runtime.lastError && Boolean(response?.success);
+    sendOpenSidePanelMessage(payload, ({ success, response, runtimeError }) => {
+        if (!success && isGestureRelatedOpenFailure(response, runtimeError)) {
+            queueOpenRetry(payload);
+        } else if (success) {
+            clearQueuedOpenRetry();
+            if (payload.spaceUuid && response?.preloaded === false) {
+                console.warn(
+                    'Grantzy extension side panel opened but space preload failed:',
+                    response?.preloadError || 'Unknown preload error'
+                );
+            }
+        }
+
         setButtonBusy(button, false);
         pulseButtonState(button, success);
     });

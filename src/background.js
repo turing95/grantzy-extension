@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
     tokenMeta: 'grantzyExtensionTokenMeta'
 };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SPACE_PATH_PATTERN = /\/spaces\/([0-9a-fA-F-]{36})(?:\/|$)/i;
 
 function storageGet(keys) {
     return new Promise(resolve => {
@@ -34,6 +35,16 @@ function normalizeToken(value) {
 function sanitizeOrganizationUuid(value) {
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
     return UUID_PATTERN.test(normalized) ? normalized : '';
+}
+
+function extractSpaceUuidFromUrl(rawUrl) {
+    try {
+        const parsed = new URL(rawUrl || '');
+        const match = parsed.pathname.match(SPACE_PATH_PATTERN);
+        return sanitizeOrganizationUuid(match?.[1]);
+    } catch (_error) {
+        return '';
+    }
 }
 
 function toTokenPreview(token) {
@@ -268,6 +279,56 @@ async function fetchApplicationDetailFromApi(applicationId) {
     } catch (_error) {
         // Fallback for older backend deployments.
         return fetchJson(buildApiUrl(`/api/spaces/${applicationId}`));
+    }
+}
+
+function isUserGestureRequirementError(message) {
+    const normalized = String(message || '').toLowerCase();
+    return normalized.includes('user gesture') || normalized.includes('gesture required');
+}
+
+async function preloadSelectedSpace(spaceUuid) {
+    const normalizedSpaceUuid = sanitizeOrganizationUuid(spaceUuid);
+    if (!normalizedSpaceUuid) {
+        return {
+            preloaded: false,
+            preloadError: null
+        };
+    }
+
+    try {
+        const detail = await fetchApplicationDetailFromApi(normalizedSpaceUuid);
+        const fields = Array.isArray(detail?.fields) ? detail.fields : [];
+        const hasFlatFields = Array.isArray(detail?.flat_fields);
+        const selectedApplicationData = {
+            fields,
+            updatedAt: detail?.updated_at || null
+        };
+
+        if (hasFlatFields) {
+            selectedApplicationData.flatFields = detail.flat_fields;
+        }
+
+        await storageSet({
+            selectedApplication: {
+                uuid: normalizedSpaceUuid,
+                title: String(detail?.title || '').trim(),
+                companyName: String(detail?.company_name || detail?.companyName || '').trim(),
+                updatedAt: detail?.updated_at || null
+            },
+            selectedApplicationData
+        });
+
+        return {
+            preloaded: true,
+            preloadError: null
+        };
+    } catch (error) {
+        console.warn('Failed to preload selected space for side panel open:', error);
+        return {
+            preloaded: false,
+            preloadError: error?.message || 'Could not preload selected space.'
+        };
     }
 }
 
@@ -614,22 +675,67 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'openSidePanelFromWebApp') {
         const tabId = sender?.tab?.id;
         if (!tabId) {
-            sendResponse({ success: false, error: 'Cannot open side panel without a tab context.' });
+            sendResponse({
+                success: false,
+                error: 'Cannot open side panel without a tab context.',
+                preloaded: false,
+                preloadError: null,
+                requiresUserGesture: false
+            });
             return false;
         }
 
         if (!chrome.sidePanel?.open) {
-            sendResponse({ success: false, error: 'Side panel is not supported in this browser.' });
+            sendResponse({
+                success: false,
+                error: 'Side panel is not supported in this browser.',
+                preloaded: false,
+                preloadError: null,
+                requiresUserGesture: false
+            });
             return false;
         }
 
+        const requestedSpaceUuid = sanitizeOrganizationUuid(message.spaceUuid)
+            || extractSpaceUuidFromUrl(message.pageUrl)
+            || extractSpaceUuidFromUrl(sender?.tab?.url || '');
         chrome.sidePanel.open({ tabId }, () => {
             if (chrome.runtime.lastError) {
-                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                const openError = chrome.runtime.lastError.message || 'Could not open side panel.';
+                sendResponse({
+                    success: false,
+                    error: openError,
+                    preloaded: false,
+                    preloadError: null,
+                    requiresUserGesture: isUserGestureRequirementError(openError)
+                });
                 return;
             }
 
-            sendResponse({ success: true });
+            if (!requestedSpaceUuid) {
+                sendResponse({
+                    success: true,
+                    preloaded: false,
+                    preloadError: null
+                });
+                return;
+            }
+
+            preloadSelectedSpace(requestedSpaceUuid)
+                .then(result => {
+                    sendResponse({
+                        success: true,
+                        preloaded: result.preloaded,
+                        preloadError: result.preloadError
+                    });
+                })
+                .catch(error => {
+                    sendResponse({
+                        success: true,
+                        preloaded: false,
+                        preloadError: error?.message || 'Could not preload selected space.'
+                    });
+                });
         });
 
         return true;
