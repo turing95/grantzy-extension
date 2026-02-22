@@ -339,18 +339,23 @@
     }
 
     function buildFingerprint(fields) {
-        const material = fields
+        const origin = window.location.origin;
+        const material = origin + '|' + fields
             .map(field => field.signature)
             .sort()
             .join('|');
 
-        let hash = 0;
+        let h1 = 0;
+        let h2 = 0;
         for (let i = 0; i < material.length; i++) {
-            hash = ((hash << 5) - hash) + material.charCodeAt(i);
-            hash |= 0;
+            const ch = material.charCodeAt(i);
+            h1 = ((h1 << 5) - h1 + ch) | 0;
+            h2 = ((h2 << 7) ^ (h2 >>> 3) ^ ch) | 0;
         }
 
-        return `fp_${Math.abs(hash)}`;
+        const hex1 = (h1 >>> 0).toString(16).padStart(8, '0');
+        const hex2 = (h2 >>> 0).toString(16).padStart(8, '0');
+        return `fp_${hex1}${hex2}`;
     }
 
     function scanForm() {

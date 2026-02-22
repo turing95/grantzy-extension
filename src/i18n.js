@@ -128,7 +128,8 @@ const STRINGS = {
     undo_failed: 'Annullamento non riuscito.',
     undo_completed_restored_fields: 'Annullamento completato. Ripristinati {count} campi.',
     updated_just_now: 'aggiornato proprio ora',
-    updated_relative: 'aggiornato {relative}'
+    updated_relative: 'aggiornato {relative}',
+    scope_suffix: ' da "{scope}"'
 };
 
 export function t(key, params = {}) {

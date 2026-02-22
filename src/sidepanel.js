@@ -339,7 +339,7 @@ function updateApplicationsCardHeader(nextApplication = null) {
             const scopedFields = flattenFields(selectedTreeNodeData);
             const scopeName = selectedTreeNodeElement?.querySelector('.tree-label-text')?.textContent?.trim() || t('selected_section');
             const scopedCount = scopedFields.length;
-            const scopeSuffix = scopeName ? ` da "${scopeName}"` : '';
+            const scopeSuffix = scopeName ? t('scope_suffix', { scope: scopeName }) : '';
             const fieldLabel = scopedCount === 1 ? t('field_singular') : t('field_plural');
             applicationsCardSubtitleEl.textContent = scopedCount
                 ? t('showing_fields_count_from_scope_click_show_all', {
@@ -694,7 +694,7 @@ function normalizeAiStatus(rawStatus, confidence, grantzyKey) {
 }
 
 function getFieldLabel(field, index) {
-    return field?.label || field?.name || field?.idAttr || field?.pathHint || t('field_label_with_index', { index: index + 1 });
+    return field?.label || field?.name || field?.idAttr || field?.placeholder || t('field_label_with_index', { index: index + 1 });
 }
 
 function buildMemoryHints(memory = {}) {
@@ -1364,13 +1364,14 @@ function highlightSelectedRootNode() {
     }
 
     let current = selectedTreeNodeElement;
+    let rootLi = current.tagName.toLowerCase() === 'li' ? current : null;
     while (current.parentElement && !current.parentElement.classList.contains('widget-sidebar')) {
-        if (current.parentElement.tagName.toLowerCase() === 'li') {
-            current = current.parentElement;
-        } else {
-            break;
+        current = current.parentElement;
+        if (current.tagName.toLowerCase() === 'li') {
+            rootLi = current;
         }
     }
+    current = rootLi || selectedTreeNodeElement;
 
     if (sidebarEl) {
         sidebarEl.querySelectorAll('li').forEach(node => node.classList.remove('selected-root'));
