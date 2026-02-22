@@ -282,8 +282,14 @@ async function fetchApplicationsFromApi(query, limit, cursor = 0, organizationUu
 async function fetchApplicationDetailFromApi(applicationId) {
     try {
         return await fetchJson(buildApiUrl(`/api/extension/v1/spaces/${applicationId}`));
-    } catch (_error) {
-        // Fallback for older backend deployments.
+    } catch (error) {
+        const statusMatch = String(error?.message || '').match(/HTTP\s+(\d+)/);
+        const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : null;
+        if (status === 401 || status === 403 || status >= 500) {
+            throw error;
+        }
+
+        // Fallback for older backend deployments (404 / method mismatch).
         return fetchJson(buildApiUrl(`/api/spaces/${applicationId}`));
     }
 }
@@ -997,4 +1003,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
 
     return true;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.url) {
+        chrome.runtime.sendMessage({
+            action: '__activeTabUrlChanged',
+            tabId,
+            url: changeInfo.url
+        }).catch(() => {
+            // Side panel may not be open — ignore.
+        });
+    }
 });

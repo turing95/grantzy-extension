@@ -1598,6 +1598,15 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
     }
 });
 
+chrome.runtime.onMessage.addListener((message) => {
+    if (message?.action === '__activeTabUrlChanged') {
+        if (latestScan || currentFillPlan.length) {
+            resetAutofillState();
+            setAutofillIdleStatus();
+        }
+    }
+});
+
 (async () => {
     const data = await storageGet('selectedApplication');
     updateSidebar(data.selectedApplication);
