@@ -624,8 +624,12 @@ function isScriptableUrl(url) {
 }
 
 function getOriginPattern(url) {
-    const parsedUrl = new URL(url);
-    return `${parsedUrl.origin}/*`;
+    try {
+        const parsedUrl = new URL(url);
+        return `${parsedUrl.origin}/*`;
+    } catch (_error) {
+        throw new Error('Invalid URL: cannot determine origin pattern.');
+    }
 }
 
 async function getActiveTab() {

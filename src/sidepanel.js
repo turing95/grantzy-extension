@@ -16,6 +16,14 @@ import {
     listRecentMappingMemories
 } from './mappingMemory.js';
 import { t } from './i18n.js';
+import {
+    sendRuntimeMessage,
+    storageGet,
+    storageSet,
+    storageRemove,
+    toApiOriginLabel,
+    formatRelativeTime
+} from './utils.js';
 
 const searchInput = document.getElementById('app-search-input');
 const resultsContainer = document.getElementById('app-search-results');
@@ -81,78 +89,12 @@ const SELECTED_APPLICATIONS_CARD_SUBTITLE = t('search_all_fields_and_click_value
 const AUTOFILL_STATUS_EMPTY_APPLICATION = t('select_application_to_enable_analyze_fill_all');
 const AUTOFILL_STATUS_READY = t('application_loaded_analyze_then_fill_or_preview');
 
-function sendRuntimeMessage(payload) {
-    return new Promise(resolve => {
-        chrome.runtime.sendMessage(payload, response => {
-            if (chrome.runtime.lastError) {
-                resolve({ success: false, error: chrome.runtime.lastError.message });
-                return;
-            }
-
-            resolve(response || { success: false, error: t('no_response_from_background') });
-        });
-    });
-}
-
-function storageGet(keys) {
-    return new Promise(resolve => {
-        chrome.storage.local.get(keys, data => resolve(data));
-    });
-}
-
-function storageSet(payload) {
-    return new Promise(resolve => {
-        chrome.storage.local.set(payload, () => resolve());
-    });
-}
-
-function formatRelativeTime(timestamp) {
-    if (!timestamp) {
-        return t('just_now');
-    }
-
-    const date = new Date(timestamp);
-    if (Number.isNaN(date.getTime())) {
-        return t('just_now');
-    }
-
-    const delta = date.getTime() - Date.now();
-    const absoluteDelta = Math.abs(delta);
-    const formatter = new Intl.RelativeTimeFormat('it', { numeric: 'auto' });
-
-    if (absoluteDelta < 60_000) {
-        return t('just_now');
-    }
-    if (absoluteDelta < 3_600_000) {
-        return formatter.format(Math.round(delta / 60_000), 'minute');
-    }
-    if (absoluteDelta < 86_400_000) {
-        return formatter.format(Math.round(delta / 3_600_000), 'hour');
-    }
-    if (absoluteDelta < 2_592_000_000) {
-        return formatter.format(Math.round(delta / 86_400_000), 'day');
-    }
-    return formatter.format(Math.round(delta / 2_592_000_000), 'month');
-}
-
 function normalizeOriginLabel(origin) {
     try {
         const parsed = new URL(origin);
         return parsed.host || origin;
     } catch (_error) {
         return origin || t('unknown_origin');
-    }
-}
-
-function toApiOriginLabel(rawUrl) {
-    if (!rawUrl) {
-        return '';
-    }
-
-    try {
-        return new URL(rawUrl).origin;
-    } catch (_error) {
-        return String(rawUrl);
     }
 }
 
@@ -739,9 +681,6 @@ function normalizeAiStatus(rawStatus, confidence, grantzyKey) {
     }
 
     if (rawStatus === 'auto' || rawStatus === 'needs_review' || rawStatus === 'skipped') {
-        if (rawStatus === 'skipped') {
-            return 'skipped';
-        }
         return rawStatus;
     }
 
@@ -1505,7 +1444,7 @@ function updateSidebar(nextSelectedApplication) {
         }
 
         sidebarEl.innerHTML = '';
-        chrome.storage.local.get('selectedApplicationData', data => {
+        storageGet('selectedApplicationData').then(data => {
             if (data.selectedApplicationData?.fields) {
                 const tree = renderTree(data.selectedApplicationData.fields);
                 if (tree.querySelector('li')) {
@@ -1608,20 +1547,19 @@ if (recheckConnectionBtn) {
     });
 }
 
-backButton.addEventListener('click', () => {
-    chrome.storage.local.remove(['selectedApplication', 'selectedApplicationData'], async () => {
-        updateSidebar(null);
-        await refreshFlatGrantzyFields();
-        resetAutofillState();
-        setAutofillIdleStatus();
+backButton.addEventListener('click', async () => {
+    await storageRemove(['selectedApplication', 'selectedApplicationData']);
+    updateSidebar(null);
+    await refreshFlatGrantzyFields();
+    resetAutofillState();
+    setAutofillIdleStatus();
 
-        resultsContainer.innerHTML = '';
-        searchInput.disabled = false;
-        searchInput.value = '';
-        await setupApplicationsViewSearch();
-        await renderQuickAccessPanel();
-        await setActiveView('applications');
-    });
+    resultsContainer.innerHTML = '';
+    searchInput.disabled = false;
+    searchInput.value = '';
+    await setupApplicationsViewSearch();
+    await renderQuickAccessPanel();
+    await setActiveView('applications');
 });
 
 chrome.storage.onChanged.addListener(async (changes, namespace) => {
@@ -1647,12 +1585,11 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
 
     if (changes.selectedApplicationData) {
         await refreshFlatGrantzyFields();
-        chrome.storage.local.get('selectedApplication', data => {
-            updateSidebar(data.selectedApplication);
-            if (!latestScan && !currentFillPlan.length && !isBusy) {
-                setAutofillIdleStatus();
-            }
-        });
+        const data = await storageGet('selectedApplication');
+        updateSidebar(data.selectedApplication);
+        if (!latestScan && !currentFillPlan.length && !isBusy) {
+            setAutofillIdleStatus();
+        }
     }
 
     if (changes[RECENT_APPLICATIONS_KEY] && currentView === 'quick_access') {
@@ -1660,7 +1597,8 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
     }
 });
 
-chrome.storage.local.get('selectedApplication', async data => {
+(async () => {
+    const data = await storageGet('selectedApplication');
     updateSidebar(data.selectedApplication);
     await refreshFlatGrantzyFields();
     resetAutofillState();
@@ -1671,4 +1609,4 @@ chrome.storage.local.get('selectedApplication', async data => {
     await refreshConnectionStatus({ withSpinner: false });
     await renderQuickAccessPanel();
     applyViewVisibility();
-});
+})();

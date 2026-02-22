@@ -1,30 +1,15 @@
+import { sendRuntimeMessage, storageGet, storageSet } from './utils.js';
+
 const STORAGE_KEY = 'grantzyAutofillMappingsV1';
 const MAX_FORMS_PER_ORIGIN = 25;
 const DEFAULT_RECENT_LIMIT = 8;
 
 function getStorageValue(key) {
-    return new Promise(resolve => {
-        chrome.storage.local.get(key, data => resolve(data[key]));
-    });
+    return storageGet(key).then(data => data[key]);
 }
 
 function setStorageValue(key, value) {
-    return new Promise(resolve => {
-        chrome.storage.local.set({ [key]: value }, () => resolve());
-    });
-}
-
-function sendRuntimeMessage(payload) {
-    return new Promise(resolve => {
-        chrome.runtime.sendMessage(payload, response => {
-            if (chrome.runtime.lastError) {
-                resolve({ success: false, error: chrome.runtime.lastError.message });
-                return;
-            }
-
-            resolve(response || { success: false, error: 'No response from background' });
-        });
-    });
+    return storageSet({ [key]: value });
 }
 
 async function readMemory() {
@@ -37,11 +22,12 @@ async function readMemory() {
 }
 
 export async function loadMappingMemory(origin, formFingerprint) {
+    if (!origin || !formFingerprint) {
+        return {};
+    }
+
     const memory = await readMemory();
     const localMappings = memory?.[origin]?.[formFingerprint]?.mappings || {};
-    if (!origin || !formFingerprint) {
-        return localMappings;
-    }
 
     const response = await sendRuntimeMessage({
         action: 'getExtensionFormMappings',
@@ -137,12 +123,19 @@ export async function saveMappingMemory(origin, formFingerprint, items, metadata
         return;
     }
 
-    await sendRuntimeMessage({
-        action: 'saveExtensionFormMappings',
-        origin,
-        formFingerprint,
-        mappings: serverMappings
-    });
+    try {
+        const response = await sendRuntimeMessage({
+            action: 'saveExtensionFormMappings',
+            origin,
+            formFingerprint,
+            mappings: serverMappings
+        });
+        if (!response?.success) {
+            console.warn('Server mapping sync failed:', response?.error || 'unknown error');
+        }
+    } catch (error) {
+        console.warn('Server mapping sync error:', error?.message || error);
+    }
 }
 
 export async function listRecentMappingMemories(limit = DEFAULT_RECENT_LIMIT) {

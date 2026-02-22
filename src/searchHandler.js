@@ -3,7 +3,9 @@ import {
     debounce,
     levenshteinDistance,
     normalizeString,
-    normalizeTokens
+    normalizeTokens,
+    sendRuntimeMessage,
+    formatRelativeTime
 } from './utils.js';
 import { t } from './i18n.js';
 
@@ -11,19 +13,6 @@ const APPLICATION_SEARCH_LIMIT = 40;
 
 let latestApplicationRequestId = 0;
 let cachedApplications = [];
-
-function sendRuntimeMessage(payload) {
-    return new Promise(resolve => {
-        chrome.runtime.sendMessage(payload, response => {
-            if (chrome.runtime.lastError) {
-                resolve({ success: false, error: chrome.runtime.lastError.message });
-                return;
-            }
-
-            resolve(response || { success: false, error: t('no_response_from_background') });
-        });
-    });
-}
 
 function dedupeApplications(sourceApplications) {
     const seen = new Set();
@@ -38,33 +27,11 @@ function dedupeApplications(sourceApplications) {
 }
 
 function describeApplicationTimestamp(isoTimestamp) {
-    if (!isoTimestamp) {
-        return '';
+    const relative = formatRelativeTime(isoTimestamp);
+    if (!relative) {
+        return isoTimestamp ? t('updated_just_now') : '';
     }
-
-    const date = new Date(isoTimestamp);
-    if (Number.isNaN(date.getTime())) {
-        return '';
-    }
-
-    const delta = date.getTime() - Date.now();
-    const absMilliseconds = Math.abs(delta);
-    const rtf = new Intl.RelativeTimeFormat('it', { numeric: 'auto' });
-
-    if (absMilliseconds < 60_000) {
-        return t('updated_just_now');
-    }
-    if (absMilliseconds < 3_600_000) {
-        return t('updated_relative', { relative: rtf.format(Math.round(delta / 60_000), 'minute') });
-    }
-    if (absMilliseconds < 86_400_000) {
-        return t('updated_relative', { relative: rtf.format(Math.round(delta / 3_600_000), 'hour') });
-    }
-    if (absMilliseconds < 2_592_000_000) {
-        return t('updated_relative', { relative: rtf.format(Math.round(delta / 86_400_000), 'day') });
-    }
-
-    return t('updated_relative', { relative: rtf.format(Math.round(delta / 2_592_000_000), 'month') });
+    return t('updated_relative', { relative });
 }
 
 function formatDataValue(value) {
@@ -118,20 +85,7 @@ function compactDisplayValue(value, maxLength = 180) {
 }
 
 async function copyToClipboard(text) {
-    if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-    }
-
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', 'readonly');
-    textarea.style.position = 'absolute';
-    textarea.style.left = '-9999px';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textarea);
+    await navigator.clipboard.writeText(text);
 }
 
 function renderStateCard(container, message, {
