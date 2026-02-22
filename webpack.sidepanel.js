@@ -1,7 +1,7 @@
 const path = require('path');
 
 module.exports = {
-  mode: 'production', // or 'development' during development
+  mode: process.env.NODE_ENV || 'production',
   entry: './src/sidepanel.js', // adjust if your entry point has a different name
   output: {
     filename: 'sidepanel.js',

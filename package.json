@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "webpack --config webpack.sidepanel.js",
-    "build:sidepanel": "webpack --config webpack.sidepanel.js",
+    "build:dev": "NODE_ENV=development webpack --config webpack.sidepanel.js",
+    "build:watch": "NODE_ENV=development webpack --config webpack.sidepanel.js --watch",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
