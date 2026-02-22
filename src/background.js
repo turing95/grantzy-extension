@@ -24,6 +24,20 @@ function storageSet(values) {
     });
 }
 
+function sessionGet(keys) {
+    if (!chrome.storage.session) return Promise.resolve({});
+    return new Promise(resolve => {
+        chrome.storage.session.get(keys, data => resolve(data || {}));
+    });
+}
+
+function sessionSet(values) {
+    if (!chrome.storage.session) return Promise.resolve();
+    return new Promise(resolve => {
+        chrome.storage.session.set(values, () => resolve());
+    });
+}
+
 function sanitizeCredentialsMode(mode) {
     return mode === 'include' ? 'include' : 'omit';
 }
@@ -95,22 +109,27 @@ function toApiOriginLabel(rawUrl) {
 }
 
 async function resolveApiRuntime() {
-    const data = await storageGet([
-        STORAGE_KEYS.apiToken,
-        STORAGE_KEYS.credentialsMode,
-        STORAGE_KEYS.tokenMeta
+    const [sessionData, localData] = await Promise.all([
+        sessionGet([STORAGE_KEYS.apiToken, STORAGE_KEYS.credentialsMode, STORAGE_KEYS.tokenMeta]),
+        storageGet([STORAGE_KEYS.apiToken, STORAGE_KEYS.credentialsMode, STORAGE_KEYS.tokenMeta])
     ]);
 
-    const storedToken = normalizeToken(data[STORAGE_KEYS.apiToken]);
+    const sessionToken = normalizeToken(sessionData[STORAGE_KEYS.apiToken]);
+    const localToken = normalizeToken(localData[STORAGE_KEYS.apiToken]);
     const envToken = normalizeToken(defaultApiToken);
-    const activeToken = storedToken || envToken;
-    const activeTokenSource = storedToken ? 'storage' : (envToken ? 'env' : 'none');
+    const activeToken = sessionToken || localToken || envToken;
+    const activeTokenSource = sessionToken ? 'session' : (localToken ? 'storage' : (envToken ? 'env' : 'none'));
+
+    const mergedMeta = sessionData[STORAGE_KEYS.tokenMeta] || localData[STORAGE_KEYS.tokenMeta];
+    const mergedCredentials = sessionData[STORAGE_KEYS.credentialsMode]
+        || localData[STORAGE_KEYS.credentialsMode]
+        || defaultCredentialsMode;
 
     return {
         token: activeToken,
         tokenSource: activeTokenSource,
-        credentialsMode: sanitizeCredentialsMode(data[STORAGE_KEYS.credentialsMode] || defaultCredentialsMode),
-        tokenMeta: sanitizeTokenMeta(data[STORAGE_KEYS.tokenMeta])
+        credentialsMode: sanitizeCredentialsMode(mergedCredentials),
+        tokenMeta: sanitizeTokenMeta(mergedMeta)
     };
 }
 
@@ -529,14 +548,21 @@ async function saveExtensionSettings(payload = {}) {
         return;
     }
 
-    await storageSet(updates);
+    await Promise.all([
+        storageSet(updates),
+        sessionSet(updates)
+    ]);
 }
 
 async function clearStoredExtensionToken() {
-    await storageSet({
+    const clearPayload = {
         [STORAGE_KEYS.apiToken]: '',
         [STORAGE_KEYS.tokenMeta]: null
-    });
+    };
+    await Promise.all([
+        storageSet(clearPayload),
+        sessionSet(clearPayload)
+    ]);
 }
 
 async function getExtensionSettingsSummary() {
