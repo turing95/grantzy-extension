@@ -1,209 +1,208 @@
 # AGENTS.md
 
-This repo contains a Chrome/Chromium **Manifest V3** extension named **“Grantzy fill form”** whose stated purpose is to **fill forms with Grantzy data**.
+This repo contains a Chrome/Chromium **Manifest V3** extension named **"Grantzy form assistant"** that **fills web forms with data from Grantzy applications/spaces**.
 
-It provides a **Side Panel** UI as the primary surface, and also includes an **optional in-page overlay widget** via a content script.
+It provides a **Side Panel** UI as the primary surface, plus content scripts for the grantzy.com web-app bridge and on-demand form filling.
 
 ---
 
 ## End-user context (who uses this & why)
 
-### Primary “final user” workflow (Side Panel)
-The intended end user is someone working in the browser (often on third-party websites) who needs to quickly **look up values from a Grantzy “application/space” and copy them into form fields**.
+### Primary workflow (Side Panel + Autofill)
+The intended end user works in the browser on third-party websites (grant portals, application forms, etc.) and needs to quickly **map and fill form fields with data from a Grantzy "application/space"**.
 
 Typical flow:
-1) Open the extension **Side Panel**.
-2) Search for and select a Grantzy application (“space”) by title/company.
-3) Browse a sidebar tree of the application’s structured data.
-4) Search within that data and click a result to **copy it to clipboard**.
-5) Paste into the form the user is completing.
+1. Open the extension **Side Panel**.
+2. Search for and select a Grantzy application ("space") by title/company.
+3. Browse a sidebar tree of the application's structured data, or search and click a result to **copy it to clipboard**.
+4. Click **Analyze Form** to scan the current page's form fields.
+5. Click **Preview** to see AI-matched or fallback field mappings, then adjust as needed.
+6. Click **Fill All** to autofill the form. Click **Undo** to revert.
 
-The UX favors “lookup + copy” rather than full auto-fill.
-
-### Secondary surface (optional in-page overlay widget)
-The repository also contains an injected overlay widget that can appear on pages and provides similar search/copy behavior. If your product direction is “side-panel only”, treat this as legacy/optional and keep changes consistent with the manifest.
+### Secondary surface (grantzy.com bridge)
+The `webappBridge.js` content script runs on grantzy.com and handles:
+- Opening the side panel from "Open in Extension" buttons on the web app
+- Token connect/disconnect via `postMessage` bridge
 
 ---
 
 ## Architecture overview
 
-### MV3 entry points
-- `manifest.json`
-  - Side Panel: `src/sidepanel.html`
-  - Background service worker (ES module): `src/background.js`
-  - Content script bundle: `dist/bundle.js` (built from `src/main.js`)
-  - Content script CSS: `styles/content.css`
+### MV3 entry points (`manifest.json`)
+- **Side Panel:** `src/sidepanel.html` → loads `dist/sidepanel.js` (webpack bundle)
+- **Background service worker** (ES module): `src/background.js`
+- **Content script** (grantzy.com only): `src/webappBridge.js`
+- **Injected content script** (on-demand, any site): `src/formFiller.content.js` — injected via `chrome.scripting.executeScript`
 
 ### Data flow
-UI modules send messages to the background service worker:
-- `fetchApplications` → fetch `${API_URL}/api/spaces`
-- `fetchApplicationData` → fetch `${API_URL}/api/spaces/:id`
+```
+Side Panel UI (sidepanel.js)
+  → sendRuntimeMessage({ action })
+    → background.js onMessage handler
+      → fetch(apiBaseUrl/...) with Bearer token auth
+      → chrome.storage.local (selectedApplication, selectedApplicationData, token, mappings)
+  → formFiller.content.js (injected by background via executeScript)
+    → scans DOM fields / fills values / undo
+    → returns results to background → side panel
+```
 
-The UI stores state in `chrome.storage.local`:
-- `selectedApplication` (uuid/title/companyName)
-- `selectedApplicationData` (fields)
+### Key API endpoints
+- `fetchApplications` → `GET /api/extension/v1/spaces` (with legacy fallback to `/api/spaces`)
+- `fetchApplicationData` → `GET /api/extension/v1/spaces/:id`
+- `matchFormFieldsWithAi` → `POST /api/extension/v1/spaces/:id/match-fields`
+- `getExtensionFormMappings` / `saveExtensionFormMappings` → `/api/extension/v1/form-mappings`
+- `getExtensionSession` → `GET /api/extension/v1/session`
+- Token management → `/api/extension/v1/tokens`
 
-### Shared search & results behavior
-Both side panel and overlay reuse `src/searchHandler.js` which implements:
-- Application search (ranked by relevance)
-- Data search (flattening nested fields + ranked matching)
-- Keyboard navigation (ArrowUp/ArrowDown/Enter)
-- Click-to-copy via `navigator.clipboard`
+### State in `chrome.storage.local`
+- `selectedApplication` — `{uuid, title, companyName, updatedAt}`
+- `selectedApplicationData` — `{fields, flatFields, updatedAt}`
+- `grantzyExtensionApiToken` — Bearer token
+- `grantzyExtensionCredentialsMode` — `'omit'` or `'include'`
+- `grantzyExtensionTokenMeta` — token metadata
+- `grantzyAutofillMappingsV1` — local mapping memory (per-origin, per-form-fingerprint)
+- `grantzyRecentApplicationsV1` — recently opened applications
 
 ---
 
 ## Repo map
 
+```
+grantzy-extension/
+├── CLAUDE.md
+├── manifest.json
+├── package.json
+├── webpack.sidepanel.js
+├── img/
+│   └── logo.svg
+├── src/
+│   ├── background.js          # Service worker — all API calls, message routing, token mgmt
+│   ├── sidepanel.html          # Side panel HTML + inline CSS
+│   ├── sidepanel.js            # Side panel runtime — state, UI, autofill orchestration
+│   ├── searchHandler.js        # Search, ranking, clipboard, results rendering
+│   ├── formFiller.content.js   # Content script — form scan, fill, undo (injected on demand)
+│   ├── webappBridge.js         # Content script for grantzy.com — side panel opener, token bridge
+│   ├── fillPlanner.js          # Local fallback fill plan builder (fuzzy matching)
+│   ├── mappingMemory.js        # Local + server mapping memory persistence
+│   ├── i18n.js                 # Italian string constants + t() interpolation
+│   ├── utils.js                # Shared: normalize, levenshtein, debounce, sendRuntimeMessage,
+│   │                           #   storageGet/Set/Remove, toApiOriginLabel, formatRelativeTime,
+│   │                           #   addUniqueEventListener
+│   ├── env.js                  # (gitignored) API_URL config — copy from env.example.js
+│   └── env.example.js          # Template for env.js
+└── dist/
+    └── sidepanel.js            # Webpack bundle output
+```
+
 ### Side Panel
-- `src/sidepanel.html`
-  - Loads `../dist/sidepanel.js`
-  - Contains the widget skeleton: header, back button, search input, results container
-  - Includes inline styles for the side panel layout
-- `src/sidepanel.js`
-  - Wires the side panel DOM to `searchHandler.js`
-  - Renders a sidebar tree and only displays non-leaf nodes (nodes with children)
-  - Updates UI when `chrome.storage.local` changes
+- `src/sidepanel.html` — loads `dist/sidepanel.js`, contains all inline CSS
+- `src/sidepanel.js` — main UI orchestration:
+  - Three views: Applications, Quick Access, Settings
+  - Sidebar tree rendering for application field hierarchy
+  - Autofill flow: analyze → preview → fill → undo
+  - Imports from `searchHandler.js`, `fillPlanner.js`, `mappingMemory.js`, `utils.js`, `i18n.js`
 
 ### Background service worker
-- `src/background.js`
-  - Imports `./env.js` for `API_URL` (see setup notes below)
-  - Handles `chrome.runtime.onMessage` for the two fetch actions
-  - **Important MV3 detail:** returns `true` to keep the message channel open for async `sendResponse`
+- `src/background.js` — handles all API calls and message routing
+  - Dual-endpoint fallback (extension/v1 → legacy) for backward compat
+  - Token storage and management (issue, revoke, rotate)
+  - Permission checking and content script injection
+  - Returns `true` from `onMessage` listener to keep async channel open
 
-### Content script overlay (optional)
-- `src/main.js`
-  - Attaches global key handlers and uses a `MutationObserver` to attach listeners to added nodes
-- `src/eventManager.js`
-  - Opens the overlay widget on `Alt+Q` (and also when an input/textarea ends with `//`)
-- `src/widget.js`
-  - Shadow DOM overlay widget UI
-  - Imports `styles/content.css` as a string via webpack and applies it with `adoptedStyleSheets`
-- `styles/content.css`
-  - Styling for the overlay widget (not the side panel)
-
-### Build configuration
-- `webpack.config.js`
-  - Entry: `./src/main.js` → output: `dist/bundle.js`
-  - CSS handled with `type: 'asset/source'` (CSS imported as a string)
-- `webpack.sidepanel.js`
-  - Entry: `./src/sidepanel.js` → output: `dist/sidepanel.js`
+### Content scripts
+- `src/webappBridge.js` — runs on `grantzy.com` / `localhost` / `127.0.0.1`
+  - Opens side panel from `[data-open-grantzy-extension]` buttons
+  - Handles `postMessage` for connect/disconnect/status
+- `src/formFiller.content.js` — injected on-demand into any permitted tab
+  - Discovers form fields (native inputs, textareas, selects + Ant Design, MUI, React Select, ARIA comboboxes)
+  - Fills values with proper event dispatching
+  - Supports undo (stores previous state per session)
+  - Bootstrap guard prevents re-execution on re-injection
 
 ---
 
 ## Local setup
 
-### Prereqs
-- Node.js + npm.
+### Prerequisites
+- Node.js + npm
 
 ### Install
 ```bash
 npm install
-````
-
-### Configure API URL (required)
-
-`src/background.js` imports `./env.js` for `API_URL`.
-
-Create `src/env.js` locally (this file may not be committed in the repo) with:
-
-```js
-export default {
-  API_URL: "https://grantzy.com"
-};
 ```
 
-⚠️ **Important:** `manifest.json` declares host permissions for `https://grantzy.com/`.
-If you set `API_URL` to another domain, you must also update `host_permissions` accordingly
-or fetches from the service worker may fail due to missing permissions.
+### Configure API URL (required)
+Copy `src/env.example.js` to `src/env.js` and set your API URL:
+```bash
+cp src/env.example.js src/env.js
+```
+
+`manifest.json` declares host permissions for `https://grantzy.com/`. If you change `API_URL`, update `host_permissions` accordingly.
 
 ---
 
 ## Build
 
-The repo does not define build scripts in `package.json` (only a placeholder `test`).
-Use `npx` directly:
-
 ```bash
-# content script bundle
-npx webpack --config webpack.config.js
-
-# side panel bundle
-npx webpack --config webpack.sidepanel.js
+npm run build          # production bundle
+npm run build:dev      # development bundle (with source maps)
+npm run build:watch    # development + watch mode
 ```
 
-Watch mode (optional):
+Output: `dist/sidepanel.js`
 
-```bash
-npx webpack --config webpack.config.js --watch
-npx webpack --config webpack.sidepanel.js --watch
-```
-
-Note: both webpack configs default to `mode: 'production'`. Switch to development if you need better debugging.
+Note: `formFiller.content.js` and `webappBridge.js` are NOT bundled — they are loaded directly as source files by the manifest and `executeScript`.
 
 ---
 
-## Run locally (manual testing)
+## Run locally
 
-1. Build both bundles (so `dist/bundle.js` and `dist/sidepanel.js` exist).
+1. Run `npm run build` to generate `dist/sidepanel.js`.
 2. Chrome → `chrome://extensions` → enable Developer mode.
-3. “Load unpacked” → choose the repo directory.
+3. "Load unpacked" → choose this directory.
 
-### Side Panel smoke test
-
-* Open the extension side panel.
-* Confirm you see “Grantzy Applications”.
-* Search and select an application.
-* Confirm the sidebar tree appears and results render.
-* Click a result value and confirm it copies to clipboard.
-* Confirm ArrowUp/ArrowDown/Enter work in results lists.
-
-### Overlay smoke test (if enabled)
-
-* On any page with an input/textarea, press `Alt+Q` to open the overlay widget.
-* Confirm it shows/hides properly and copy-to-clipboard works.
+### Smoke test
+- Open the side panel → confirm "Pratiche Grantzy" heading appears
+- Search and select an application → sidebar tree renders
+- Click a field value → copies to clipboard
+- ArrowUp/ArrowDown/Enter work in results lists
+- Navigate to any form page → Analyze Form → Preview → Fill All → Undo
 
 ---
 
-## Common pitfalls / gotchas
+## Common pitfalls
 
-* **MV3 async messaging:** if you add new background message actions, ensure you keep the message channel open for async responses (return `true`).
-* **Permissions vs API_URL:** keep `host_permissions` aligned with `API_URL`.
-* **State keys:** side panel UI reacts to `chrome.storage.local` keys `selectedApplication` and `selectedApplicationData`.
-* **Listener duplication:** search code stores listeners on DOM nodes (e.g., `_applicationSearchListener`, `_dataSearchAttached`). Be careful not to attach duplicates.
-* **Performance:** the content script uses a `MutationObserver` and attaches key listeners broadly. If you expand overlay behavior, keep performance in mind.
-* **Two style systems:** side panel uses inline CSS in `sidepanel.html`; overlay uses `styles/content.css` imported through webpack.
-
----
-
-## How to change behavior (quick pointers)
-
-* API integration / message routing: `src/background.js`
-* Side panel layout & static UI: `src/sidepanel.html`
-* Side panel runtime behavior & tree rendering: `src/sidepanel.js`
-* Search ranking, flattening, keyboard selection, click-to-copy: `src/searchHandler.js`
-* Overlay triggers: `src/eventManager.js`
-* Overlay widget UI (Shadow DOM): `src/widget.js`
-* Bundling outputs: `webpack.config.js`, `webpack.sidepanel.js`
+- **MV3 async messaging:** return `true` from `onMessage` for async `sendResponse`.
+- **Permissions vs API_URL:** keep `host_permissions` aligned with API URL.
+- **State keys:** the side panel reacts to `chrome.storage.onChanged` for `selectedApplication` and `selectedApplicationData`.
+- **Shared utilities:** use imports from `utils.js` — do NOT duplicate `sendRuntimeMessage`, `storageGet/Set`, `levenshteinDistance`, etc.
+- **Content script injection:** `formFiller.content.js` is injected via `executeScript` — it cannot use ES module imports.
+- **Inline CSS:** all side panel styles live in `sidepanel.html` as inline `<style>` blocks.
 
 ---
 
-## Contribution hygiene (for automated agents)
+## How to change behavior
 
-When making changes:
-
-* Keep diffs small and focused.
-* Prefer updating shared logic in `searchHandler.js` if it affects both side panel and overlay.
-* After modifying `src/*` that is bundled, rebuild webpack outputs before testing.
-* Call out any permission changes in `manifest.json` in your PR description.
-* Avoid adding secrets. `env.js` must only contain a non-secret base URL.
-* Validate: side panel search/select, tree rendering, data search, clipboard copy, keyboard navigation.
+| Area | File(s) |
+|------|---------|
+| API integration / message routing | `src/background.js` |
+| Side panel layout & static UI | `src/sidepanel.html` |
+| Side panel runtime & autofill orchestration | `src/sidepanel.js` |
+| Search ranking, results, clipboard | `src/searchHandler.js` |
+| Form field discovery & filling | `src/formFiller.content.js` |
+| Local fallback fill planner | `src/fillPlanner.js` |
+| Mapping memory (local + server) | `src/mappingMemory.js` |
+| Web app ↔ extension bridge | `src/webappBridge.js` |
+| Shared utilities | `src/utils.js` |
+| All user-facing strings (Italian) | `src/i18n.js` |
+| Bundling | `webpack.sidepanel.js` |
 
 ---
 
-## Release checklist (manual)
+## Contribution hygiene
 
-* Bundles build cleanly (`dist/bundle.js`, `dist/sidepanel.js`).
-* Side panel works end-to-end against the configured API.
-* Clipboard works on stable Chrome.
-* No console errors in background service worker.
-* Permissions are minimal and correct for the deployed API URL.
+- Keep diffs small and focused.
+- After modifying bundled `src/*` files, rebuild with `npm run build`.
+- Call out any permission changes in `manifest.json`.
+- `env.js` must only contain a non-secret base URL + optional token.
+- Validate: search/select, tree rendering, autofill flow, clipboard, keyboard nav.
