@@ -249,7 +249,13 @@ async function fetchApplicationsFromApi(query, limit, cursor = 0, organizationUu
             source: 'extension_v1'
         };
     } catch (error) {
-        // Fallback for older backend deployments.
+        const statusMatch = String(error?.message || '').match(/HTTP\s+(\d+)/);
+        const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : null;
+        if (status === 401 || status === 403 || status >= 500) {
+            throw error;
+        }
+
+        // Fallback for older backend deployments (404 / method mismatch).
         const legacyData = await fetchJson(buildApiUrl('/api/spaces'));
         const normalizedQuery = String(query || '').toLowerCase().trim();
         const applications = normalizeApplicationsResponse(legacyData).items;
@@ -659,7 +665,17 @@ async function runTabAutofillAction(tabMessage) {
     await ensureTabPermission(tab.url || '', false);
     await executeScript(tab.id, ['src/formFiller.content.js']);
 
-    const response = await sendMessageToTab(tab.id, tabMessage);
+    let response;
+    try {
+        response = await sendMessageToTab(tab.id, tabMessage);
+    } catch (connectionError) {
+        const msg = String(connectionError?.message || '');
+        if (msg.includes('Could not establish connection') || msg.includes('Receiving end does not exist')) {
+            throw new Error('Could not reach the page. Please refresh it and try again.');
+        }
+        throw connectionError;
+    }
+
     if (!response || response.success === false) {
         throw new Error(response?.error || 'Autofill action failed');
     }

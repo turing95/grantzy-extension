@@ -594,17 +594,16 @@ async function renderRecentApplicationsList() {
 async function handleRecentMappingClick(mappingItem) {
     await setActiveView('applications');
 
-    if (!selectedApplication && mappingItem.application?.uuid) {
+    if (!selectedApplication) {
+        if (!mappingItem.application?.uuid) {
+            setAutofillStatus(t('select_application_before_apply_mapping_memory'), 'error');
+            return;
+        }
         await selectApplication({
             uuid: mappingItem.application.uuid,
             title: mappingItem.application.title,
             companyName: mappingItem.application.companyName
         }, { focusSearch: false });
-    }
-
-    if (!selectedApplication && !mappingItem.application?.uuid) {
-        setAutofillStatus(t('select_application_before_apply_mapping_memory'), 'error');
-        return;
     }
 
     await previewFillPlan();
