@@ -4,9 +4,21 @@ const EXTENSION_READY_EVENT = 'grantzy-extension-ready';
 const USER_GESTURE_ERROR_PATTERN = /(user gesture|gesture required|may only be called.*gesture)/i;
 const SPACE_PATH_PATTERN = /\/spaces\/([0-9a-fA-F-]{36})(?:\/|$)/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_TOKEN_LENGTH = 4096;
+const BRIDGE_TYPES = Object.freeze({
+    connect: 'grantzy-extension-connect',
+    disconnect: 'grantzy-extension-disconnect',
+    statusRequest: 'grantzy-extension-status-request'
+});
+const BRIDGE_TYPE_SET = new Set(Object.values(BRIDGE_TYPES));
 
 let pendingOpenRetryPayload = null;
 let retryListenersAttached = false;
+let warnedOriginCompatibilityFallback = false;
+
+function isRuntimeAvailable() {
+    return !!(chrome && chrome.runtime && chrome.runtime.sendMessage);
+}
 
 function announceExtensionAvailability() {
     document.documentElement.dataset.grantzyExtensionInstalled = '1';
@@ -92,6 +104,12 @@ function isGestureRelatedOpenFailure(response, runtimeError) {
 }
 
 function sendOpenSidePanelMessage(payload, callback) {
+    if (!isRuntimeAvailable()) {
+        console.warn('Grantzy extension: runtime disconnected, cannot send message. Reload the page.');
+        callback({ success: false, response: null, runtimeError: { message: 'Extension context invalidated' } });
+        return;
+    }
+
     chrome.runtime.sendMessage(payload, response => {
         const runtimeError = chrome.runtime.lastError;
         callback({
@@ -185,7 +203,11 @@ function onDocumentClick(event) {
     openSidePanelFromUserClick(button);
 }
 
-function isGrantzyOrigin(origin) {
+function isSameOrigin(origin) {
+    return origin === window.location.origin;
+}
+
+function isGrantzyOriginFallback(origin) {
     try {
         const url = new URL(origin);
         return url.hostname === location.hostname;
@@ -194,24 +216,88 @@ function isGrantzyOrigin(origin) {
     }
 }
 
+function isAllowedMessageOrigin(origin) {
+    if (isSameOrigin(origin)) {
+        return true;
+    }
+
+    if (isGrantzyOriginFallback(origin)) {
+        if (!warnedOriginCompatibilityFallback) {
+            warnedOriginCompatibilityFallback = true;
+            console.warn('Grantzy extension bridge accepted non-exact same-origin message via compatibility fallback.');
+        }
+        return true;
+    }
+
+    return false;
+}
+
+function sanitizeToken(rawToken) {
+    if (typeof rawToken !== 'string') {
+        return '';
+    }
+    const normalized = rawToken.trim();
+    if (!normalized || normalized.length > MAX_TOKEN_LENGTH) {
+        return '';
+    }
+    return normalized;
+}
+
+function sanitizeTokenMeta(rawTokenMeta) {
+    if (!rawTokenMeta || typeof rawTokenMeta !== 'object') {
+        return null;
+    }
+
+    return {
+        id: rawTokenMeta.id ? String(rawTokenMeta.id) : '',
+        name: rawTokenMeta.name ? String(rawTokenMeta.name) : '',
+        keyPrefix: rawTokenMeta.keyPrefix ? String(rawTokenMeta.keyPrefix) : '',
+        expiresAt: rawTokenMeta.expiresAt ? String(rawTokenMeta.expiresAt) : null
+    };
+}
+
+function postBridgeResult(type, payload, targetOrigin) {
+    window.postMessage({ type, ...payload }, targetOrigin);
+}
+
 function handleWindowMessage(event) {
+    if (event.source !== window) {
+        return;
+    }
+
     if (!event.data || typeof event.data !== 'object') {
         return;
     }
 
-    if (!isGrantzyOrigin(event.origin)) {
+    const { type } = event.data;
+    if (!BRIDGE_TYPE_SET.has(type)) {
         return;
     }
 
-    const { type } = event.data;
+    if (!isAllowedMessageOrigin(event.origin)) {
+        return;
+    }
 
-    if (type === 'grantzy-extension-connect') {
-        const { token, tokenMeta } = event.data;
+    if (!isRuntimeAvailable()) {
+        const errorResult = { success: false, error: 'Extension context invalidated. Reload the page.' };
+        if (type === BRIDGE_TYPES.connect) {
+            postBridgeResult('grantzy-extension-connect-result', errorResult, event.origin);
+        } else if (type === BRIDGE_TYPES.disconnect) {
+            postBridgeResult('grantzy-extension-disconnect-result', errorResult, event.origin);
+        } else if (type === BRIDGE_TYPES.statusRequest) {
+            postBridgeResult('grantzy-extension-status', { connected: false, user: null, error: errorResult.error }, event.origin);
+        }
+        return;
+    }
+
+    if (type === BRIDGE_TYPES.connect) {
+        const token = sanitizeToken(event.data.token);
         if (!token) {
-            window.postMessage({ type: 'grantzy-extension-connect-result', success: false, error: 'No token provided' }, event.origin);
+            postBridgeResult('grantzy-extension-connect-result', { success: false, error: 'No token provided' }, event.origin);
             return;
         }
 
+        const tokenMeta = sanitizeTokenMeta(event.data.tokenMeta);
         chrome.runtime.sendMessage({
             action: 'saveExtensionSettings',
             apiToken: token,
@@ -219,8 +305,7 @@ function handleWindowMessage(event) {
             tokenMeta: tokenMeta || null
         }, response => {
             const success = !chrome.runtime.lastError && Boolean(response?.success);
-            window.postMessage({
-                type: 'grantzy-extension-connect-result',
+            postBridgeResult('grantzy-extension-connect-result', {
                 success,
                 error: success ? null : (response?.error || chrome.runtime.lastError?.message || 'Unknown error')
             }, event.origin);
@@ -228,11 +313,10 @@ function handleWindowMessage(event) {
         return;
     }
 
-    if (type === 'grantzy-extension-disconnect') {
+    if (type === BRIDGE_TYPES.disconnect) {
         chrome.runtime.sendMessage({ action: 'clearExtensionToken' }, response => {
             const success = !chrome.runtime.lastError && Boolean(response?.success);
-            window.postMessage({
-                type: 'grantzy-extension-disconnect-result',
+            postBridgeResult('grantzy-extension-disconnect-result', {
                 success,
                 error: success ? null : (response?.error || chrome.runtime.lastError?.message || 'Unknown error')
             }, event.origin);
@@ -240,11 +324,10 @@ function handleWindowMessage(event) {
         return;
     }
 
-    if (type === 'grantzy-extension-status-request') {
+    if (type === BRIDGE_TYPES.statusRequest) {
         chrome.runtime.sendMessage({ action: 'getExtensionSession' }, response => {
             if (chrome.runtime.lastError || !response?.success) {
-                window.postMessage({
-                    type: 'grantzy-extension-status',
+                postBridgeResult('grantzy-extension-status', {
                     connected: false,
                     user: null,
                     error: response?.error || chrome.runtime.lastError?.message || null
@@ -254,8 +337,7 @@ function handleWindowMessage(event) {
 
             const session = response.session || {};
             const user = session.user || null;
-            window.postMessage({
-                type: 'grantzy-extension-status',
+            postBridgeResult('grantzy-extension-status', {
                 connected: true,
                 user: user ? { name: user.name, email: user.email } : null
             }, event.origin);

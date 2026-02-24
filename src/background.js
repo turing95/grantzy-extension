@@ -12,30 +12,76 @@ const STORAGE_KEYS = {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SPACE_PATH_PATTERN = /\/spaces\/([0-9a-fA-F-]{36})(?:\/|$)/i;
 
-function storageGet(keys) {
-    return new Promise(resolve => {
-        chrome.storage.local.get(keys, data => resolve(data || {}));
+function wrapChromeCallback(executor, { defaultValue, rejectOnError = false } = {}) {
+    return new Promise((resolve, reject) => {
+        executor((...args) => {
+            const runtimeError = chrome.runtime.lastError;
+            if (runtimeError) {
+                if (rejectOnError) {
+                    reject(new Error(runtimeError.message));
+                    return;
+                }
+                resolve(defaultValue);
+                return;
+            }
+
+            if (!args.length) {
+                resolve(defaultValue);
+                return;
+            }
+
+            resolve(args[0]);
+        });
     });
 }
 
+function storageGet(keys) {
+    return wrapChromeCallback(
+        callback => chrome.storage.local.get(keys, callback),
+        { defaultValue: {} }
+    ).then(data => data || {});
+}
+
 function storageSet(values) {
-    return new Promise(resolve => {
-        chrome.storage.local.set(values, () => resolve());
-    });
+    return wrapChromeCallback(
+        callback => chrome.storage.local.set(values, callback),
+        { defaultValue: null }
+    ).then(() => undefined);
 }
 
 function sessionGet(keys) {
     if (!chrome.storage.session) return Promise.resolve({});
-    return new Promise(resolve => {
-        chrome.storage.session.get(keys, data => resolve(data || {}));
-    });
+    return wrapChromeCallback(
+        callback => chrome.storage.session.get(keys, callback),
+        { defaultValue: {} }
+    ).then(data => data || {});
 }
 
 function sessionSet(values) {
     if (!chrome.storage.session) return Promise.resolve();
-    return new Promise(resolve => {
-        chrome.storage.session.set(values, () => resolve());
-    });
+    return wrapChromeCallback(
+        callback => chrome.storage.session.set(values, callback),
+        { defaultValue: null }
+    ).then(() => undefined);
+}
+
+async function hardenStorageAccessLevels() {
+    const areaNames = ['local', 'session'];
+    await Promise.all(areaNames.map(async areaName => {
+        const area = chrome.storage?.[areaName];
+        if (!area || typeof area.setAccessLevel !== 'function') {
+            return;
+        }
+
+        try {
+            await wrapChromeCallback(
+                callback => area.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }, callback),
+                { defaultValue: null, rejectOnError: true }
+            );
+        } catch (error) {
+            console.warn(`Could not set storage.${areaName} access level:`, error);
+        }
+    }));
 }
 
 function sanitizeCredentialsMode(mode) {
@@ -582,69 +628,44 @@ async function getExtensionSettingsSummary() {
 }
 
 function queryTabs(queryInfo) {
-    return new Promise((resolve, reject) => {
-        chrome.tabs.query(queryInfo, tabs => {
-            if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-            }
-            resolve(tabs || []);
-        });
-    });
+    return wrapChromeCallback(
+        callback => chrome.tabs.query(queryInfo, callback),
+        { rejectOnError: true, defaultValue: [] }
+    ).then(tabs => tabs || []);
 }
 
 function permissionsContains(permissions) {
-    return new Promise((resolve, reject) => {
-        chrome.permissions.contains(permissions, result => {
-            if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-            }
-            resolve(Boolean(result));
-        });
-    });
+    return wrapChromeCallback(
+        callback => chrome.permissions.contains(permissions, callback),
+        { rejectOnError: true, defaultValue: false }
+    ).then(result => Boolean(result));
 }
 
 function permissionsRequest(permissions) {
-    return new Promise((resolve, reject) => {
-        chrome.permissions.request(permissions, granted => {
-            if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-            }
-            resolve(Boolean(granted));
-        });
-    });
+    return wrapChromeCallback(
+        callback => chrome.permissions.request(permissions, callback),
+        { rejectOnError: true, defaultValue: false }
+    ).then(granted => Boolean(granted));
 }
 
 function executeScript(tabId, files) {
-    return new Promise((resolve, reject) => {
-        chrome.scripting.executeScript(
+    return wrapChromeCallback(
+        callback => chrome.scripting.executeScript(
             {
                 target: { tabId },
                 files
             },
-            () => {
-                if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message));
-                    return;
-                }
-                resolve();
-            }
-        );
-    });
+            callback
+        ),
+        { rejectOnError: true, defaultValue: null }
+    ).then(() => undefined);
 }
 
 function sendMessageToTab(tabId, payload) {
-    return new Promise((resolve, reject) => {
-        chrome.tabs.sendMessage(tabId, payload, response => {
-            if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-            }
-            resolve(response);
-        });
-    });
+    return wrapChromeCallback(
+        callback => chrome.tabs.sendMessage(tabId, payload, callback),
+        { rejectOnError: true, defaultValue: null }
+    );
 }
 
 function isScriptableUrl(url) {
@@ -723,305 +744,325 @@ async function runTabAutofillAction(tabMessage) {
     };
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'openSidePanelFromWebApp') {
-        const tabId = sender?.tab?.id;
-        if (!tabId) {
-            sendResponse({
-                success: false,
-                error: 'Cannot open side panel without a tab context.',
-                preloaded: false,
-                preloadError: null,
-                requiresUserGesture: false
-            });
-            return false;
-        }
+function parseBoundedInteger(rawValue, fallback, min, max) {
+    const parsed = Number.parseInt(String(rawValue || ''), 10);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+    return Math.min(Math.max(parsed, min), max);
+}
 
-        if (!chrome.sidePanel?.open) {
-            sendResponse({
-                success: false,
-                error: 'Side panel is not supported in this browser.',
-                preloaded: false,
-                preloadError: null,
-                requiresUserGesture: false
-            });
-            return false;
-        }
+function toIssuedTokenMeta(issued, source) {
+    return {
+        id: issued.id,
+        name: issued.name,
+        keyPrefix: issued.key_prefix || toTokenPreview(issued.token),
+        expiresAt: issued.expires_at || null,
+        source,
+        createdAt: new Date().toISOString()
+    };
+}
 
-        const requestedSpaceUuid = sanitizeOrganizationUuid(message.spaceUuid)
-            || extractSpaceUuidFromUrl(message.pageUrl)
-            || extractSpaceUuidFromUrl(sender?.tab?.url || '');
-        chrome.sidePanel.open({ tabId }, () => {
-            if (chrome.runtime.lastError) {
-                const openError = chrome.runtime.lastError.message || 'Could not open side panel.';
-                sendResponse({
-                    success: false,
-                    error: openError,
-                    preloaded: false,
-                    preloadError: null,
-                    requiresUserGesture: isUserGestureRequirementError(openError)
-                });
-                return;
-            }
+async function handleFetchApplications(message) {
+    const query = typeof message.query === 'string' ? message.query.trim() : '';
+    const limit = parseBoundedInteger(message.limit, 40, 1, 100);
+    const cursor = parseBoundedInteger(message.cursor, 0, 0, Number.MAX_SAFE_INTEGER);
+    const organizationUuid = sanitizeOrganizationUuid(message.organizationUuid);
+    const payload = await fetchApplicationsFromApi(query, limit, cursor, organizationUuid);
+    return {
+        success: true,
+        applications: payload.applications,
+        nextCursor: payload.nextCursor,
+        source: payload.source
+    };
+}
 
-            if (!requestedSpaceUuid) {
-                sendResponse({
-                    success: true,
-                    preloaded: false,
-                    preloadError: null
-                });
-                return;
-            }
+async function handleFetchApplicationData(message) {
+    if (!message.applicationId) {
+        throw new Error('applicationId is required');
+    }
+    const data = await fetchApplicationDetailFromApi(message.applicationId);
+    return { success: true, data };
+}
 
-            preloadSelectedSpace(requestedSpaceUuid)
-                .then(result => {
-                    sendResponse({
-                        success: true,
-                        preloaded: result.preloaded,
-                        preloadError: result.preloadError
-                    });
-                })
-                .catch(error => {
-                    sendResponse({
-                        success: true,
-                        preloaded: false,
-                        preloadError: error?.message || 'Could not preload selected space.'
-                    });
-                });
-        });
-
-        return true;
+async function handleMatchFormFieldsWithAi(message) {
+    if (!message.applicationId) {
+        throw new Error('applicationId is required');
     }
 
-    async function handleMessage() {
-        if (message.action === 'fetchApplications') {
-            const query = typeof message.query === 'string' ? message.query.trim() : '';
-            const rawLimit = Number.parseInt(String(message.limit || ''), 10);
-            const rawCursor = Number.parseInt(String(message.cursor || ''), 10);
-            const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 40;
-            const cursor = Number.isFinite(rawCursor) ? Math.max(rawCursor, 0) : 0;
-            const organizationUuid = sanitizeOrganizationUuid(message.organizationUuid);
-            const payload = await fetchApplicationsFromApi(query, limit, cursor, organizationUuid);
-            return {
+    const data = await matchFormFieldsWithAiFromApi({
+        applicationId: message.applicationId,
+        origin: message.origin,
+        url: message.url,
+        formFingerprint: message.formFingerprint,
+        fields: message.fields,
+        memoryHints: message.memoryHints
+    });
+
+    return {
+        success: true,
+        items: Array.isArray(data?.items) ? data.items : [],
+        meta: data?.meta || null
+    };
+}
+
+async function handleGetExtensionFormMappings(message) {
+    const data = await fetchExtensionFormMappingsFromApi({
+        origin: message.origin,
+        formFingerprint: message.formFingerprint
+    });
+
+    return {
+        success: true,
+        origin: data?.origin || '',
+        formFingerprint: data?.form_fingerprint || '',
+        mappings: Array.isArray(data?.mappings) ? data.mappings : [],
+        meta: data?.meta || null
+    };
+}
+
+async function handleSaveExtensionFormMappings(message) {
+    const data = await saveExtensionFormMappingsToApi({
+        origin: message.origin,
+        formFingerprint: message.formFingerprint,
+        mappings: message.mappings
+    });
+
+    return {
+        success: true,
+        savedCount: Number.parseInt(String(data?.saved_count || '0'), 10) || 0
+    };
+}
+
+async function handleSaveExtensionSettings(message) {
+    const payload = {};
+    if (Object.prototype.hasOwnProperty.call(message, 'apiToken')) {
+        payload.apiToken = message.apiToken;
+    }
+    if (Object.prototype.hasOwnProperty.call(message, 'credentialsMode')) {
+        payload.credentialsMode = message.credentialsMode;
+    }
+    if (Object.prototype.hasOwnProperty.call(message, 'tokenMeta')) {
+        payload.tokenMeta = message.tokenMeta;
+    }
+
+    await saveExtensionSettings(payload);
+    const settings = await getExtensionSettingsSummary();
+    return { success: true, settings };
+}
+
+async function handleIssueExtensionToken(message) {
+    const issued = await issueExtensionTokenFromApi({
+        name: message.name,
+        expiresInDays: message.expiresInDays
+    });
+
+    const tokenMeta = toIssuedTokenMeta(issued, 'issued');
+    await saveExtensionSettings({
+        apiToken: issued.token,
+        credentialsMode: 'omit',
+        tokenMeta
+    });
+
+    const settings = await getExtensionSettingsSummary();
+    return {
+        success: true,
+        issuedToken: issued.token,
+        tokenMeta,
+        settings
+    };
+}
+
+async function handleRevokeExtensionToken(message) {
+    const tokenId = String(message.tokenId || '').trim();
+    if (!tokenId) {
+        throw new Error('Token id is required for revoke.');
+    }
+
+    await revokeExtensionTokenFromApi(tokenId);
+    const runtime = await resolveApiRuntime();
+    if (runtime.tokenMeta?.id === tokenId) {
+        await clearStoredExtensionToken();
+    }
+
+    const settings = await getExtensionSettingsSummary();
+    return { success: true, settings };
+}
+
+async function handleRotateExtensionToken(message) {
+    const runtime = await resolveApiRuntime();
+    const existingTokenId = String(message.tokenId || runtime.tokenMeta?.id || '').trim();
+    if (!existingTokenId) {
+        throw new Error('Rotation requires a stored token issued from this extension.');
+    }
+
+    await revokeExtensionTokenFromApi(existingTokenId);
+    const issued = await issueExtensionTokenFromApi({
+        name: message.name || runtime.tokenMeta?.name || '',
+        expiresInDays: message.expiresInDays
+    });
+
+    const tokenMeta = toIssuedTokenMeta(issued, 'rotated');
+    await saveExtensionSettings({
+        apiToken: issued.token,
+        credentialsMode: 'omit',
+        tokenMeta
+    });
+
+    const settings = await getExtensionSettingsSummary();
+    return {
+        success: true,
+        issuedToken: issued.token,
+        tokenMeta,
+        settings
+    };
+}
+
+async function handleGetActiveTabInfo() {
+    const tab = await getActiveTab();
+    if (!isScriptableUrl(tab.url || '')) {
+        return {
+            success: true,
+            url: tab.url,
+            scriptable: false
+        };
+    }
+
+    const originPattern = getOriginPattern(tab.url);
+    const hasPermission = await permissionsContains({ origins: [originPattern] });
+
+    return {
+        success: true,
+        url: tab.url,
+        scriptable: true,
+        originPattern,
+        hasPermission
+    };
+}
+
+const ACTION_HANDLERS = {
+    fetchApplications: handleFetchApplications,
+    fetchApplicationData: handleFetchApplicationData,
+    matchFormFieldsWithAi: handleMatchFormFieldsWithAi,
+    getExtensionFormMappings: handleGetExtensionFormMappings,
+    saveExtensionFormMappings: handleSaveExtensionFormMappings,
+    getExtensionSession: async message => {
+        const session = await fetchExtensionSessionFromApi({ forceSession: Boolean(message.forceSession) });
+        return { success: true, session };
+    },
+    getExtensionSettings: async () => {
+        const settings = await getExtensionSettingsSummary();
+        return { success: true, settings };
+    },
+    saveExtensionSettings: handleSaveExtensionSettings,
+    clearExtensionToken: async () => {
+        await clearStoredExtensionToken();
+        const settings = await getExtensionSettingsSummary();
+        return { success: true, settings };
+    },
+    issueExtensionToken: handleIssueExtensionToken,
+    revokeExtensionToken: handleRevokeExtensionToken,
+    rotateExtensionToken: handleRotateExtensionToken,
+    listExtensionTokens: async message => {
+        const tokens = await listExtensionTokensFromApi(parseBoundedInteger(message.limit, 20, 1, 100));
+        return { success: true, tokens };
+    },
+    scanFormInActiveTab: async () => runTabAutofillAction({ action: '__grantzy_scan_form' }),
+    applyFillPlanInActiveTab: async message => runTabAutofillAction({
+        action: '__grantzy_apply_fill',
+        planItems: Array.isArray(message.planItems) ? message.planItems : []
+    }),
+    undoLastFillInActiveTab: async () => runTabAutofillAction({ action: '__grantzy_undo_fill' }),
+    getActiveTabInfo: handleGetActiveTabInfo
+};
+
+function handleOpenSidePanelFromWebApp(message, sender, sendResponse) {
+    const tabId = sender?.tab?.id;
+    if (!tabId) {
+        sendResponse({
+            success: false,
+            error: 'Cannot open side panel without a tab context.',
+            preloaded: false,
+            preloadError: null,
+            requiresUserGesture: false
+        });
+        return false;
+    }
+
+    if (!chrome.sidePanel?.open) {
+        sendResponse({
+            success: false,
+            error: 'Side panel is not supported in this browser.',
+            preloaded: false,
+            preloadError: null,
+            requiresUserGesture: false
+        });
+        return false;
+    }
+
+    const requestedSpaceUuid = sanitizeOrganizationUuid(message.spaceUuid)
+        || extractSpaceUuidFromUrl(message.pageUrl)
+        || extractSpaceUuidFromUrl(sender?.tab?.url || '');
+
+    chrome.sidePanel.open({ tabId }, () => {
+        if (chrome.runtime.lastError) {
+            const openError = chrome.runtime.lastError.message || 'Could not open side panel.';
+            sendResponse({
+                success: false,
+                error: openError,
+                preloaded: false,
+                preloadError: null,
+                requiresUserGesture: isUserGestureRequirementError(openError)
+            });
+            return;
+        }
+
+        if (!requestedSpaceUuid) {
+            sendResponse({
                 success: true,
-                applications: payload.applications,
-                nextCursor: payload.nextCursor,
-                source: payload.source
-            };
-        }
-
-        if (message.action === 'fetchApplicationData' && message.applicationId) {
-            const data = await fetchApplicationDetailFromApi(message.applicationId);
-            return { success: true, data };
-        }
-
-        if (message.action === 'matchFormFieldsWithAi' && message.applicationId) {
-            const data = await matchFormFieldsWithAiFromApi({
-                applicationId: message.applicationId,
-                origin: message.origin,
-                url: message.url,
-                formFingerprint: message.formFingerprint,
-                fields: message.fields,
-                memoryHints: message.memoryHints
+                preloaded: false,
+                preloadError: null
             });
-
-            return {
-                success: true,
-                items: Array.isArray(data?.items) ? data.items : [],
-                meta: data?.meta || null
-            };
+            return;
         }
 
-        if (message.action === 'getExtensionFormMappings') {
-            const data = await fetchExtensionFormMappingsFromApi({
-                origin: message.origin,
-                formFingerprint: message.formFingerprint
-            });
-
-            return {
-                success: true,
-                origin: data?.origin || '',
-                formFingerprint: data?.form_fingerprint || '',
-                mappings: Array.isArray(data?.mappings) ? data.mappings : [],
-                meta: data?.meta || null
-            };
-        }
-
-        if (message.action === 'saveExtensionFormMappings') {
-            const data = await saveExtensionFormMappingsToApi({
-                origin: message.origin,
-                formFingerprint: message.formFingerprint,
-                mappings: message.mappings
-            });
-
-            return {
-                success: true,
-                savedCount: Number.parseInt(String(data?.saved_count || '0'), 10) || 0
-            };
-        }
-
-        if (message.action === 'getExtensionSession') {
-            const session = await fetchExtensionSessionFromApi({ forceSession: Boolean(message.forceSession) });
-            return { success: true, session };
-        }
-
-        if (message.action === 'getExtensionSettings') {
-            const settings = await getExtensionSettingsSummary();
-            return { success: true, settings };
-        }
-
-        if (message.action === 'saveExtensionSettings') {
-            const payload = {};
-            if (Object.prototype.hasOwnProperty.call(message, 'apiToken')) {
-                payload.apiToken = message.apiToken;
-            }
-            if (Object.prototype.hasOwnProperty.call(message, 'credentialsMode')) {
-                payload.credentialsMode = message.credentialsMode;
-            }
-            if (Object.prototype.hasOwnProperty.call(message, 'tokenMeta')) {
-                payload.tokenMeta = message.tokenMeta;
-            }
-
-            await saveExtensionSettings(payload);
-            const settings = await getExtensionSettingsSummary();
-            return { success: true, settings };
-        }
-
-        if (message.action === 'clearExtensionToken') {
-            await clearStoredExtensionToken();
-            const settings = await getExtensionSettingsSummary();
-            return { success: true, settings };
-        }
-
-        if (message.action === 'issueExtensionToken') {
-            const issued = await issueExtensionTokenFromApi({
-                name: message.name,
-                expiresInDays: message.expiresInDays
-            });
-
-            const tokenMeta = {
-                id: issued.id,
-                name: issued.name,
-                keyPrefix: issued.key_prefix || toTokenPreview(issued.token),
-                expiresAt: issued.expires_at || null,
-                source: 'issued',
-                createdAt: new Date().toISOString()
-            };
-
-            await saveExtensionSettings({
-                apiToken: issued.token,
-                credentialsMode: 'omit',
-                tokenMeta
-            });
-
-            const settings = await getExtensionSettingsSummary();
-            return {
-                success: true,
-                issuedToken: issued.token,
-                tokenMeta,
-                settings
-            };
-        }
-
-        if (message.action === 'revokeExtensionToken') {
-            const tokenId = String(message.tokenId || '').trim();
-            if (!tokenId) {
-                throw new Error('Token id is required for revoke.');
-            }
-
-            await revokeExtensionTokenFromApi(tokenId);
-            const runtime = await resolveApiRuntime();
-            if (runtime.tokenMeta?.id === tokenId) {
-                await clearStoredExtensionToken();
-            }
-
-            const settings = await getExtensionSettingsSummary();
-            return { success: true, settings };
-        }
-
-        if (message.action === 'rotateExtensionToken') {
-            const runtime = await resolveApiRuntime();
-            const existingTokenId = String(message.tokenId || runtime.tokenMeta?.id || '').trim();
-            if (!existingTokenId) {
-                throw new Error('Rotation requires a stored token issued from this extension.');
-            }
-
-            await revokeExtensionTokenFromApi(existingTokenId);
-            const issued = await issueExtensionTokenFromApi({
-                name: message.name || runtime.tokenMeta?.name || '',
-                expiresInDays: message.expiresInDays
-            });
-
-            const tokenMeta = {
-                id: issued.id,
-                name: issued.name,
-                keyPrefix: issued.key_prefix || toTokenPreview(issued.token),
-                expiresAt: issued.expires_at || null,
-                source: 'rotated',
-                createdAt: new Date().toISOString()
-            };
-
-            await saveExtensionSettings({
-                apiToken: issued.token,
-                credentialsMode: 'omit',
-                tokenMeta
-            });
-
-            const settings = await getExtensionSettingsSummary();
-            return {
-                success: true,
-                issuedToken: issued.token,
-                tokenMeta,
-                settings
-            };
-        }
-
-        if (message.action === 'listExtensionTokens') {
-            const tokens = await listExtensionTokensFromApi(Number.parseInt(String(message.limit || '20'), 10));
-            return { success: true, tokens };
-        }
-
-        if (message.action === 'scanFormInActiveTab') {
-            return runTabAutofillAction({ action: '__grantzy_scan_form' });
-        }
-
-        if (message.action === 'applyFillPlanInActiveTab') {
-            return runTabAutofillAction({
-                action: '__grantzy_apply_fill',
-                planItems: Array.isArray(message.planItems) ? message.planItems : []
-            });
-        }
-
-        if (message.action === 'undoLastFillInActiveTab') {
-            return runTabAutofillAction({ action: '__grantzy_undo_fill' });
-        }
-
-        if (message.action === 'getActiveTabInfo') {
-            const tab = await getActiveTab();
-            if (!isScriptableUrl(tab.url || '')) {
-                return {
+        preloadSelectedSpace(requestedSpaceUuid)
+            .then(result => {
+                sendResponse({
                     success: true,
-                    url: tab.url,
-                    scriptable: false
-                };
-            }
+                    preloaded: result.preloaded,
+                    preloadError: result.preloadError
+                });
+            })
+            .catch(error => {
+                sendResponse({
+                    success: true,
+                    preloaded: false,
+                    preloadError: error?.message || 'Could not preload selected space.'
+                });
+            });
+    });
 
-            const originPattern = getOriginPattern(tab.url);
-            const hasPermission = await permissionsContains({ origins: [originPattern] });
+    return true;
+}
 
-            return {
-                success: true,
-                url: tab.url,
-                scriptable: true,
-                originPattern,
-                hasPermission
-            };
-        }
-
+async function dispatchBackgroundAction(rawMessage) {
+    const message = rawMessage && typeof rawMessage === 'object' ? rawMessage : {};
+    const action = String(message.action || '').trim();
+    const handler = ACTION_HANDLERS[action];
+    if (!handler) {
         return { success: false, error: 'Unknown action' };
     }
+    return handler(message);
+}
 
-    handleMessage()
+chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
+    const message = rawMessage && typeof rawMessage === 'object' ? rawMessage : {};
+    if (message.action === 'openSidePanelFromWebApp') {
+        return handleOpenSidePanelFromWebApp(message, sender, sendResponse);
+    }
+
+    dispatchBackgroundAction(message)
         .then(result => sendResponse(result))
         .catch(error => {
             console.error('Background action error:', error);
@@ -1029,6 +1070,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
 
     return true;
+});
+
+hardenStorageAccessLevels().catch(error => {
+    console.warn('Storage access level hardening failed:', error);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {

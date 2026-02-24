@@ -182,6 +182,11 @@ function setConnectionStatus(message, tone = 'neutral') {
     } else if (tone === 'pending') {
         connectionStatusEl.classList.add('pending');
     }
+
+    const strip = connectionStatusEl.closest('.connection-strip');
+    if (strip) {
+        strip.hidden = tone === 'ok';
+    }
 }
 
 function summarizeAuthMode(method) {
@@ -607,10 +612,10 @@ async function refreshSettingsPanel() {
     setSettingsStatus(t('checking_connection'), 'neutral');
 
     if (settingsConnectedDetailsEl) {
-        settingsConnectedDetailsEl.style.display = 'none';
+        settingsConnectedDetailsEl.hidden = true;
     }
     if (settingsNotConnectedPromptEl) {
-        settingsNotConnectedPromptEl.style.display = 'none';
+        settingsNotConnectedPromptEl.hidden = true;
     }
 
     const settingsResponse = await sendRuntimeMessage({ action: 'getExtensionSettings' });
@@ -629,7 +634,7 @@ async function refreshSettingsPanel() {
             settingsUserDisplayEl.textContent = displayName;
         }
         if (settingsConnectedDetailsEl) {
-            settingsConnectedDetailsEl.style.display = '';
+            settingsConnectedDetailsEl.hidden = false;
         }
         if (settingsDisconnectBtn) {
             settingsDisconnectBtn.disabled = false;
@@ -637,7 +642,7 @@ async function refreshSettingsPanel() {
     } else {
         setSettingsStatus(t('not_connected'), 'error');
         if (settingsNotConnectedPromptEl) {
-            settingsNotConnectedPromptEl.style.display = '';
+            settingsNotConnectedPromptEl.hidden = false;
         }
         if (settingsDisconnectBtn) {
             settingsDisconnectBtn.disabled = true;

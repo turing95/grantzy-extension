@@ -40,6 +40,24 @@ export function levenshteinDistance(a, b) {
 
 const _listenerRegistry = new WeakMap();
 
+function wrapChromeCallback(executor, fallbackValue = undefined) {
+  return new Promise(resolve => {
+    executor((...args) => {
+      if (chrome.runtime.lastError) {
+        resolve(fallbackValue);
+        return;
+      }
+
+      if (!args.length) {
+        resolve(fallbackValue);
+        return;
+      }
+
+      resolve(args[0]);
+    });
+  });
+}
+
 export function addUniqueEventListener(element, event, listener, key) {
   if (!_listenerRegistry.has(element)) {
     _listenerRegistry.set(element, new Map());
@@ -56,31 +74,36 @@ export function addUniqueEventListener(element, event, listener, key) {
 export function sendRuntimeMessage(payload) {
   return new Promise(resolve => {
     chrome.runtime.sendMessage(payload, response => {
-      if (chrome.runtime.lastError) {
-        resolve({ success: false, error: chrome.runtime.lastError.message });
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        resolve({ success: false, error: runtimeError.message });
         return;
       }
+
       resolve(response || { success: false, error: 'No response from background' });
     });
   });
 }
 
 export function storageGet(keys) {
-  return new Promise(resolve => {
-    chrome.storage.local.get(keys, data => resolve(data || {}));
-  });
+  return wrapChromeCallback(
+      callback => chrome.storage.local.get(keys, callback),
+      {}
+  ).then(data => data || {});
 }
 
 export function storageSet(payload) {
-  return new Promise(resolve => {
-    chrome.storage.local.set(payload, () => resolve());
-  });
+  return wrapChromeCallback(
+      callback => chrome.storage.local.set(payload, callback),
+      null
+  ).then(() => undefined);
 }
 
 export function storageRemove(keys) {
-  return new Promise(resolve => {
-    chrome.storage.local.remove(keys, () => resolve());
-  });
+  return wrapChromeCallback(
+      callback => chrome.storage.local.remove(keys, callback),
+      null
+  ).then(() => undefined);
 }
 
 export function toApiOriginLabel(rawUrl) {
