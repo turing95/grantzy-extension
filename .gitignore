@@ -6,4 +6,5 @@ node_modules
 .cache
 
 .idea
+.claude/
 src/env.js
