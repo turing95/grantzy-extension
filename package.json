@@ -9,7 +9,8 @@
     "build:watch": "NODE_ENV=development webpack --config webpack.sidepanel.js --watch",
     "lint": "eslint \"src/**/*.js\" \"tests/**/*.test.mjs\"",
     "test": "node --test tests",
-    "check": "npm run lint && npm run test"
+    "check": "npm run lint && npm run test",
+    "release": "npm run build && rm -rf release && mkdir -p release/src release/dist release/styles release/img && cp manifest.json release/ && cp src/sidepanel.html src/background.js src/webappBridge.js src/formFiller.content.js src/env.js src/package.json release/src/ && cp dist/sidepanel.js release/dist/ && cp styles/sidepanel.css release/styles/ && cp img/logo.svg release/img/"
   },
   "repository": {
     "type": "git",

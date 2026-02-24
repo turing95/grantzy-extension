@@ -8,3 +8,4 @@ node_modules
 .idea
 .claude/
 src/env.js
+release/
