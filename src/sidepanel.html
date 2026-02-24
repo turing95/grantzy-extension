@@ -14,17 +14,23 @@
 <body>
 <div id="grantzy-sidepanel" class="grantzy-widget">
     <div class="widget-container">
-        <div class="widget-topbar">
-            <div class="widget-title-group">
-                <div class="widget-header">Pratiche Grantzy</div>
-                <p id="widget-context" class="widget-subtitle" aria-live="polite">Seleziona una pratica, poi analizza e compila il modulo corrente.</p>
-            </div>
-            <div class="topbar-actions">
-                <div class="connection-strip">
-                    <span id="connection-status" class="pending" role="status" aria-live="polite">Verifica connessione al server...</span>
-                    <button id="recheck-connection-btn" type="button">Ricontrolla</button>
+        <div class="widget-topbar" data-collapsible="topbar">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-controls="topbar-body">
+                <span class="collapse-toggle-label">Pratiche Grantzy</span>
+                <span class="collapse-toggle-chevron" aria-hidden="true">&#x25BE;</span>
+            </button>
+            <div id="topbar-body" class="collapsible-body">
+                <div class="widget-title-group">
+                    <div class="widget-header">Pratiche Grantzy</div>
+                    <p id="widget-context" class="widget-subtitle" aria-live="polite">Seleziona una pratica, poi analizza e compila il modulo corrente.</p>
                 </div>
-                <button id="back-button">← Torna alle Pratiche</button>
+                <div class="topbar-actions">
+                    <div class="connection-strip">
+                        <span id="connection-status" class="pending" role="status" aria-live="polite">Verifica connessione al server...</span>
+                        <button id="recheck-connection-btn" type="button">Ricontrolla</button>
+                    </div>
+                    <button id="back-button">← Torna alle Pratiche</button>
+                </div>
             </div>
         </div>
 
@@ -51,20 +57,26 @@
                     <div id="app-search-results" class="results-container"></div>
                 </article>
 
-                <section id="autofill-panel" class="panel-card">
-                    <header class="panel-card-header">
-                        <h3>Assistente compilazione</h3>
-                        <p>Analizza la pagina attiva, anteprima mappature, poi compila.</p>
-                    </header>
-                    <div class="autofill-actions">
-                        <button id="analyze-form-btn" type="button">Analizza Modulo</button>
-                        <button id="preview-fill-btn" type="button">Anteprima</button>
-                        <button id="apply-fill-btn" type="button">Compila Tutto</button>
-                        <button id="undo-fill-btn" type="button">Annulla Compilazione</button>
+                <section id="autofill-panel" class="panel-card" data-collapsible="autofill">
+                    <button class="collapse-toggle" type="button" aria-expanded="true" aria-controls="autofill-body">
+                        <span class="collapse-toggle-label">Assistente compilazione</span>
+                        <span class="collapse-toggle-chevron" aria-hidden="true">&#x25BE;</span>
+                    </button>
+                    <div id="autofill-body" class="collapsible-body">
+                        <header class="panel-card-header">
+                            <h3>Assistente compilazione</h3>
+                            <p>Analizza la pagina attiva, anteprima mappature, poi compila.</p>
+                        </header>
+                        <div class="autofill-actions">
+                            <button id="analyze-form-btn" type="button">Analizza Modulo</button>
+                            <button id="preview-fill-btn" type="button">Anteprima</button>
+                            <button id="apply-fill-btn" type="button">Compila Tutto</button>
+                            <button id="undo-fill-btn" type="button">Annulla Compilazione</button>
+                        </div>
+                        <div id="autofill-status" role="status" aria-live="polite">Seleziona una pratica per abilitare Analizza / Compila Tutto.</div>
+                        <div id="autofill-preview" hidden></div>
+                        <div id="autofill-report" hidden></div>
                     </div>
-                    <div id="autofill-status" role="status" aria-live="polite">Seleziona una pratica per abilitare Analizza / Compila Tutto.</div>
-                    <div id="autofill-preview" hidden></div>
-                    <div id="autofill-report" hidden></div>
                 </section>
             </section>
 

@@ -129,7 +129,9 @@ const STRINGS = {
     undo_completed_restored_fields: 'Annullamento completato. Ripristinati {count} campi.',
     updated_just_now: 'aggiornato proprio ora',
     updated_relative: 'aggiornato {relative}',
-    scope_suffix: ' da "{scope}"'
+    scope_suffix: ' da "{scope}"',
+    collapse_section: 'Comprimi sezione',
+    expand_section: 'Espandi sezione'
 };
 
 export function t(key, params = {}) {

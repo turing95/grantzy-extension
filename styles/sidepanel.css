@@ -1410,6 +1410,11 @@ select:focus-visible {
   }
 
   .widget-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .widget-topbar > .collapsible-body {
     flex-direction: row;
     align-items: flex-end;
     justify-content: space-between;
@@ -1590,4 +1595,92 @@ body {
 .quick-card,
 .settings-card {
   border-radius: 8px;
+}
+
+/* ── Collapsible sections ── */
+
+.collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+
+.collapse-toggle:hover {
+  background: rgba(30, 56, 136, 0.06);
+}
+
+.collapse-toggle-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* When expanded, hide label so it doesn't duplicate the inner heading */
+[data-collapsible]:not(.collapsed) .collapse-toggle-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+[data-collapsible]:not(.collapsed) .collapse-toggle {
+  justify-content: flex-end;
+  min-height: 20px;
+  padding: 2px 8px;
+}
+
+.collapse-toggle-chevron {
+  flex: 0 0 auto;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: transform 200ms ease;
+}
+
+.collapsed .collapse-toggle-chevron {
+  transform: rotate(-90deg);
+}
+
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  max-height: 600px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 200ms ease, opacity 150ms ease;
+}
+
+.collapsed .collapsible-body {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.widget-topbar.collapsed {
+  padding-bottom: 0;
+  gap: 0;
+}
+
+#autofill-panel.collapsed {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  gap: 0;
 }

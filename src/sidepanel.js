@@ -61,6 +61,10 @@ const autofillStatusEl = document.getElementById('autofill-status');
 const autofillPreviewEl = document.getElementById('autofill-preview');
 const autofillReportEl = document.getElementById('autofill-report');
 
+const COLLAPSE_STATE_KEY = 'grantzyCollapseSectionsV1';
+const topbarEl = widgetEl.querySelector('.widget-topbar');
+const autofillPanelEl = document.getElementById('autofill-panel');
+
 widgetEl.searchContextData = null;
 widgetEl.activeOrganizationUuid = '';
 
@@ -1612,9 +1616,54 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 });
 
+// ── Collapsible sections ──
+
+const collapsibleEls = { topbar: topbarEl, autofill: autofillPanelEl };
+
+function applyCollapseState(key, collapsed) {
+    const el = collapsibleEls[key];
+    if (!el) return;
+    const toggle = el.querySelector('.collapse-toggle');
+    el.classList.toggle('collapsed', collapsed);
+    if (toggle) {
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+        toggle.setAttribute('aria-label', collapsed ? t('expand_section') : t('collapse_section'));
+    }
+}
+
+async function loadCollapseState() {
+    const data = await storageGet(COLLAPSE_STATE_KEY);
+    const state = data[COLLAPSE_STATE_KEY] || {};
+    for (const key of Object.keys(collapsibleEls)) {
+        applyCollapseState(key, !!state[key]);
+    }
+}
+
+async function saveCollapseState() {
+    const state = {};
+    for (const key of Object.keys(collapsibleEls)) {
+        state[key] = collapsibleEls[key]?.classList.contains('collapsed') || false;
+    }
+    await storageSet({ [COLLAPSE_STATE_KEY]: state });
+}
+
+function toggleCollapse(key) {
+    const el = collapsibleEls[key];
+    if (!el) return;
+    const next = !el.classList.contains('collapsed');
+    applyCollapseState(key, next);
+    saveCollapseState();
+}
+
+for (const [key, el] of Object.entries(collapsibleEls)) {
+    const toggle = el?.querySelector('.collapse-toggle');
+    if (toggle) toggle.addEventListener('click', () => toggleCollapse(key));
+}
+
 (async () => {
     const data = await storageGet('selectedApplication');
     updateSidebar(data.selectedApplication);
+    await loadCollapseState();
     await refreshFlatGrantzyFields();
     resetAutofillState();
     setAutofillIdleStatus();
