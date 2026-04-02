@@ -473,6 +473,24 @@ body {
   padding: 8px 2px;
 }
 
+.loader.loading-fullscreen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 16px;
+  width: 100%;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+
+.loader.loading-fullscreen .loader-spinner {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+
 .loader-spinner {
   width: 14px;
   height: 14px;

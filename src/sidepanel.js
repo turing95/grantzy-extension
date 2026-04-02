@@ -1529,8 +1529,11 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
         resultsContainer.innerHTML = '';
         searchInput.disabled = true;
         const loader = document.createElement('div');
-        loader.className = 'loader';
-        loader.textContent = t('loading_application_fields');
+        loader.className = 'loader loading-fullscreen';
+        const spinner = document.createElement('span');
+        spinner.className = 'loader-spinner';
+        loader.appendChild(spinner);
+        loader.appendChild(document.createTextNode(t('loading_application_fields')));
         resultsContainer.appendChild(loader);
         setAutofillStatus(t('loading_application_fields'));
     }
@@ -1655,18 +1658,22 @@ for (const [key, el] of Object.entries(collapsibleEls)) {
             chrome.storage.local.remove('grantzyPreloadingSpace');
         }
     } else if (initData.grantzyPreloadingSpace && !initData.selectedApplication) {
-        await setupApplicationsViewSearch();
         resultsContainer.innerHTML = '';
         searchInput.disabled = true;
+        searchInput.placeholder = '';
         const loader = document.createElement('div');
-        loader.className = 'loader';
-        loader.textContent = t('loading_application_fields');
+        loader.className = 'loader loading-fullscreen';
+        const spinner = document.createElement('span');
+        spinner.className = 'loader-spinner';
+        loader.appendChild(spinner);
+        loader.appendChild(document.createTextNode(t('loading_application_fields')));
         resultsContainer.appendChild(loader);
         setAutofillStatus(t('loading_application_fields'));
         setTimeout(() => {
             storageGet('grantzyPreloadingSpace').then(data => {
                 if (data.grantzyPreloadingSpace) {
                     chrome.storage.local.remove('grantzyPreloadingSpace');
+                    setupApplicationsViewSearch();
                     searchInput.disabled = false;
                 }
             });
