@@ -8,4 +8,5 @@ node_modules
 .idea
 .claude/
 src/env.js
-release/
+release/grantzy-extension-v*.zip
+.DS_Store

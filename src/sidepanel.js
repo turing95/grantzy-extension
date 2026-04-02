@@ -89,15 +89,6 @@ const SELECTED_APPLICATIONS_CARD_SUBTITLE = t('search_all_fields_and_click_value
 const AUTOFILL_STATUS_EMPTY_APPLICATION = t('select_application_to_enable_analyze_fill_all');
 const AUTOFILL_STATUS_READY = t('application_loaded_analyze_then_fill_or_preview');
 
-function normalizeOriginLabel(origin) {
-    try {
-        const parsed = new URL(origin);
-        return parsed.host || origin;
-    } catch (_error) {
-        return origin || t('unknown_origin');
-    }
-}
-
 function sanitizeOrganizationUuid(value) {
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
     return UUID_PATTERN.test(normalized) ? normalized : '';
@@ -1140,7 +1131,6 @@ function renderTree(data) {
 }
 
 let sidebarTreeData = null;
-let sidebarTreeContainer = null;
 
 function normalizeTreeEntries(data) {
     if (Array.isArray(data)) return data;
@@ -1411,7 +1401,6 @@ function updateSidebar(nextSelectedApplication) {
             filterSidebarTree(treeContainer, query);
         });
 
-        sidebarTreeContainer = treeContainer;
         storageGet('selectedApplicationData').then(data => {
             if (data.selectedApplicationData?.fields) {
                 sidebarTreeData = data.selectedApplicationData.fields;
@@ -1642,20 +1631,31 @@ for (const [key, el] of Object.entries(collapsibleEls)) {
 }
 
 (async () => {
-    const initData = await storageGet(['selectedApplication', 'grantzyPreloadingSpace']);
+    const initData = await storageGet(['selectedApplication', 'selectedApplicationData', 'grantzyPreloadingSpace']);
     updateSidebar(initData.selectedApplication);
     await loadCollapseState();
     await refreshFlatGrantzyFields();
     resetAutofillState();
     setAutofillIdleStatus();
     await refreshSettingsPanel();
-    await setupApplicationsViewSearch();
     await setActiveView('applications');
     await refreshConnectionStatus({ withSpinner: false });
     await renderQuickAccessPanel();
-    applyViewVisibility();
 
-    if (initData.grantzyPreloadingSpace && !initData.selectedApplication) {
+    if (initData.selectedApplication?.uuid && initData.selectedApplicationData?.fields) {
+        resultsContainer.innerHTML = '';
+        await new Promise(resolve => {
+            setupDataSearch(searchInput, resultsContainer, initData.selectedApplication.uuid, widgetEl, () => resolve());
+        });
+        updateWidgetHeader(initData.selectedApplication);
+        backButton.style.display = 'block';
+        searchInput.disabled = false;
+        searchInput.value = '';
+        if (initData.grantzyPreloadingSpace) {
+            chrome.storage.local.remove('grantzyPreloadingSpace');
+        }
+    } else if (initData.grantzyPreloadingSpace && !initData.selectedApplication) {
+        await setupApplicationsViewSearch();
         resultsContainer.innerHTML = '';
         searchInput.disabled = true;
         const loader = document.createElement('div');
@@ -1671,7 +1671,12 @@ for (const [key, el] of Object.entries(collapsibleEls)) {
                 }
             });
         }, 60000);
-    } else if (initData.grantzyPreloadingSpace) {
-        chrome.storage.local.remove('grantzyPreloadingSpace');
+    } else {
+        await setupApplicationsViewSearch();
+        if (initData.grantzyPreloadingSpace) {
+            chrome.storage.local.remove('grantzyPreloadingSpace');
+        }
     }
+
+    applyViewVisibility();
 })();
