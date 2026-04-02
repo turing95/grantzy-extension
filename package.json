@@ -10,6 +10,7 @@
     "lint": "eslint \"src/**/*.js\" \"tests/**/*.test.mjs\"",
     "test": "node --test tests/*.test.mjs",
     "check": "npm run lint && npm run test",
+    "test:visual": "node scripts/test-sidepanel.mjs",
     "publish": "bash scripts/publish.sh",
     "release": "npm run build && rm -rf release && mkdir -p release/src release/dist release/styles release/img && cp manifest.json release/ && cp src/sidepanel.html src/background.js src/webappBridge.js src/formFiller.content.js src/env.js src/package.json release/src/ && cp dist/sidepanel.js release/dist/ && cp styles/sidepanel.css release/styles/ && cp img/logo.svg release/img/"
   },
@@ -26,6 +27,7 @@
   "homepage": "https://github.com/turing95/grantzy-extension#readme",
   "devDependencies": {
     "eslint": "^8.57.0",
+    "playwright": "^1.59.1",
     "webpack": "^5.98.0",
     "webpack-cli": "^6.0.1"
   }

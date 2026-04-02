@@ -3,6 +3,7 @@ import {
     setupDataSearch,
     flattenFields,
     updateDataResults,
+    updateResultsContainer,
     resultsSelection
 } from './searchHandler.js';
 import {
@@ -1560,13 +1561,18 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
 
     if (changes.selectedApplicationData) {
         await refreshFlatGrantzyFields();
-        const data = await storageGet('selectedApplication');
+        const data = await storageGet(['selectedApplication', 'selectedApplicationData']);
         updateSidebar(data.selectedApplication);
-        if (data.selectedApplication?.uuid) {
+        if (data.selectedApplication?.uuid && data.selectedApplicationData?.fields) {
+            const storedData = data.selectedApplicationData;
+            const fields = Array.isArray(storedData.flatFields)
+                ? storedData.flatFields
+                : flattenFields(storedData.fields);
             resultsContainer.innerHTML = '';
-            await new Promise(resolve => {
-                setupDataSearch(searchInput, resultsContainer, data.selectedApplication.uuid, widgetEl, () => resolve());
-            });
+            updateResultsContainer(resultsContainer, fields, widgetEl, searchInput);
+            resultsSelection(resultsContainer, searchInput);
+            updateWidgetHeader(data.selectedApplication);
+            backButton.style.display = 'block';
             searchInput.disabled = false;
             searchInput.value = '';
         }
@@ -1646,10 +1652,12 @@ for (const [key, el] of Object.entries(collapsibleEls)) {
     await renderQuickAccessPanel();
 
     if (initData.selectedApplication?.uuid && initData.selectedApplicationData?.fields) {
-        resultsContainer.innerHTML = '';
-        await new Promise(resolve => {
-            setupDataSearch(searchInput, resultsContainer, initData.selectedApplication.uuid, widgetEl, () => resolve());
-        });
+        const storedData = initData.selectedApplicationData;
+        const fields = Array.isArray(storedData.flatFields)
+            ? storedData.flatFields
+            : flattenFields(storedData.fields);
+        updateResultsContainer(resultsContainer, fields, widgetEl, searchInput);
+        resultsSelection(resultsContainer, searchInput);
         updateWidgetHeader(initData.selectedApplication);
         backButton.style.display = 'block';
         searchInput.disabled = false;

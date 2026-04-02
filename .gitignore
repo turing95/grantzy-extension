@@ -10,3 +10,5 @@ node_modules
 src/env.js
 release/grantzy-extension-v*.zip
 .DS_Store
+.test-screenshots/
+.test-profile/
