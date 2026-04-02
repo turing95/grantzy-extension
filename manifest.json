@@ -10,7 +10,8 @@
     "storage",
     "sidePanel",
     "scripting",
-    "tabs"
+    "tabs",
+    "downloads"
   ],
   "host_permissions": [
     "https://grantzy.com/*",

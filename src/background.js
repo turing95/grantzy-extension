@@ -973,7 +973,31 @@ const ACTION_HANDLERS = {
         planItems: Array.isArray(message.planItems) ? message.planItems : []
     }),
     undoLastFillInActiveTab: async () => runTabAutofillAction({ action: '__grantzy_undo_fill' }),
-    getActiveTabInfo: handleGetActiveTabInfo
+    getActiveTabInfo: handleGetActiveTabInfo,
+    downloadFile: async (message) => {
+        if (!message.fileUuid) {
+            throw new Error('fileUuid is required');
+        }
+        const data = await fetchJson(
+            buildApiUrl(`/api/extension/v1/files/${message.fileUuid}/download/`)
+        );
+        if (!data.download_url) {
+            throw new Error('No download URL received');
+        }
+        const downloadId = await new Promise((resolve, reject) => {
+            chrome.downloads.download({
+                url: data.download_url,
+                filename: data.filename || message.fileName || 'download'
+            }, id => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                    resolve(id);
+                }
+            });
+        });
+        return { success: true, downloadId };
+    }
 };
 
 function handleOpenSidePanelFromWebApp(message, sender, sendResponse) {
@@ -1026,8 +1050,11 @@ function handleOpenSidePanelFromWebApp(message, sender, sendResponse) {
             return;
         }
 
+        chrome.storage.local.set({ grantzyPreloadingSpace: requestedSpaceUuid });
+
         preloadSelectedSpace(requestedSpaceUuid)
             .then(result => {
+                chrome.storage.local.remove('grantzyPreloadingSpace');
                 sendResponse({
                     success: true,
                     preloaded: result.preloaded,
@@ -1035,6 +1062,7 @@ function handleOpenSidePanelFromWebApp(message, sender, sendResponse) {
                 });
             })
             .catch(error => {
+                chrome.storage.local.remove('grantzyPreloadingSpace');
                 sendResponse({
                     success: true,
                     preloaded: false,

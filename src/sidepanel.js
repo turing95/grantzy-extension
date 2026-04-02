@@ -12,8 +12,7 @@ import {
 } from './fillPlanner.js';
 import {
     loadMappingMemory,
-    saveMappingMemory,
-    listRecentMappingMemories
+    saveMappingMemory
 } from './mappingMemory.js';
 import { t } from './i18n.js';
 import {
@@ -45,7 +44,6 @@ const applicationsViewEl = document.getElementById('applications-view');
 const quickAccessViewEl = document.getElementById('quick-access-view');
 const settingsViewEl = document.getElementById('settings-view');
 const recentApplicationsListEl = document.getElementById('recent-applications-list');
-const recentMappingsListEl = document.getElementById('recent-mappings-list');
 const settingsConnectionInfoEl = document.getElementById('settings-connection-info');
 const settingsConnectedDetailsEl = document.getElementById('settings-connected-details');
 const settingsUserDisplayEl = document.getElementById('settings-user-display');
@@ -53,12 +51,9 @@ const settingsNotConnectedPromptEl = document.getElementById('settings-not-conne
 const settingsManageBtn = document.getElementById('settings-manage-btn');
 const settingsDisconnectBtn = document.getElementById('settings-disconnect-btn');
 
-const analyzeFormButton = document.getElementById('analyze-form-btn');
-const previewFillButton = document.getElementById('preview-fill-btn');
 const applyFillButton = document.getElementById('apply-fill-btn');
 const undoFillButton = document.getElementById('undo-fill-btn');
 const autofillStatusEl = document.getElementById('autofill-status');
-const autofillPreviewEl = document.getElementById('autofill-preview');
 const autofillReportEl = document.getElementById('autofill-report');
 
 const COLLAPSE_STATE_KEY = 'grantzyCollapseSectionsV1';
@@ -77,6 +72,7 @@ let flatGrantzyFields = [];
 let latestScan = null;
 let currentFillPlan = [];
 let isBusy = false;
+let activeFillSession = 0;
 let currentView = 'applications';
 let extensionSettings = null;
 let activeApiOriginLabel = '';
@@ -281,15 +277,10 @@ function setBusyState(nextBusy) {
 
 function updateActionButtons() {
     const hasApplication = Boolean(selectedApplication);
-    const hasScan = Boolean(latestScan?.fields?.length);
-    const hasPlan = currentFillPlan.length > 0;
-    const hasSelectedPlanItems = currentFillPlan.some(item => item.enabled && item.grantzyKey);
-    const canFillAll = hasApplication && flatGrantzyFields.length && (!hasPlan || hasSelectedPlanItems);
+    const canFill = hasApplication && flatGrantzyFields.length;
 
-    analyzeFormButton.disabled = isBusy || !hasApplication;
-    previewFillButton.disabled = isBusy || !hasApplication || !flatGrantzyFields.length;
-    applyFillButton.disabled = isBusy || !canFillAll;
-    undoFillButton.disabled = isBusy || !hasScan;
+    applyFillButton.disabled = isBusy || !canFill;
+    undoFillButton.disabled = isBusy;
 }
 
 function getApplicationSummary(rawApplication) {
@@ -406,6 +397,7 @@ function applyViewVisibility() {
 
     const shouldShowSidebar = Boolean(sidebarEl) && isApplicationsView;
     containerEl.classList.toggle('no-sidebar', !shouldShowSidebar);
+    containerEl.classList.toggle('has-selected-application', Boolean(selectedApplication) && isApplicationsView);
 
     if (sidebarEl) {
         sidebarEl.style.display = shouldShowSidebar ? '' : 'none';
@@ -542,74 +534,8 @@ async function renderRecentApplicationsList() {
     });
 }
 
-async function handleRecentMappingClick(mappingItem) {
-    await setActiveView('applications');
-
-    if (!selectedApplication) {
-        if (!mappingItem.application?.uuid) {
-            setAutofillStatus(t('select_application_before_apply_mapping_memory'), 'error');
-            return;
-        }
-        await selectApplication({
-            uuid: mappingItem.application.uuid,
-            title: mappingItem.application.title,
-            companyName: mappingItem.application.companyName
-        }, { focusSearch: false });
-    }
-
-    await previewFillPlan();
-}
-
-async function renderRecentMappingsList() {
-    if (!recentMappingsListEl) {
-        return;
-    }
-
-    const recentMappings = await listRecentMappingMemories(8);
-    if (!recentMappings.length) {
-        renderQuickEmptyState(recentMappingsListEl, t('no_mapping_memory'));
-        return;
-    }
-
-    recentMappingsListEl.innerHTML = '';
-    recentMappings.forEach(item => {
-        const row = document.createElement('div');
-        row.className = 'quick-item';
-
-        const meta = document.createElement('div');
-        meta.className = 'quick-item-meta';
-
-        const title = document.createElement('strong');
-        const appLabel = item.application?.title || normalizeOriginLabel(item.origin);
-        title.textContent = appLabel;
-        meta.appendChild(title);
-
-        const detail = document.createElement('span');
-        detail.textContent = t('mappings_count_origin_time', {
-            count: item.mappingCount,
-            origin: normalizeOriginLabel(item.origin),
-            relative: formatRelativeTime(item.updatedAt)
-        });
-        meta.appendChild(detail);
-
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = t('use');
-        button.addEventListener('click', async () => {
-            await handleRecentMappingClick(item);
-        });
-
-        row.appendChild(meta);
-        row.appendChild(button);
-        recentMappingsListEl.appendChild(row);
-    });
-}
-
 async function renderQuickAccessPanel() {
-    await Promise.all([
-        renderRecentApplicationsList(),
-        renderRecentMappingsList()
-    ]);
+    await renderRecentApplicationsList();
 }
 
 async function refreshSettingsPanel() {
@@ -654,26 +580,9 @@ async function refreshSettingsPanel() {
     }
 }
 
-function statusBadge(status) {
-    const badge = document.createElement('span');
-    badge.className = `preview-badge ${status}`;
-    const statusKey = `status_${status}`;
-    const translatedStatus = t(statusKey);
-    badge.textContent = translatedStatus === statusKey ? status.replace('_', ' ') : translatedStatus;
-    return badge;
-}
-
 function getGrantzyValueByKey(key) {
     const match = flatGrantzyFields.find(item => item.key === key);
     return match ? String(match.value ?? '') : '';
-}
-
-function getSelectableOptions(item) {
-    const candidateKeys = item.candidates.map(candidate => candidate.key);
-    const directKeys = flatGrantzyFields.map(field => field.key);
-    const unique = new Set([...candidateKeys, ...directKeys]);
-
-    return Array.from(unique).sort((a, b) => a.localeCompare(b));
 }
 
 function normalizeConfidence(value) {
@@ -813,135 +722,6 @@ function buildAiFillPlan(aiItems = [], formFields = []) {
     });
 }
 
-function applyManualMapping(item, selectedKey) {
-    if (!selectedKey) {
-        item.grantzyKey = null;
-        item.grantzyValue = '';
-        item.status = 'skipped';
-        item.reason = 'unmapped';
-        item.confidence = 0;
-        item.dropdownOption = null;
-        item.enabled = false;
-        return;
-    }
-
-    item.grantzyKey = selectedKey;
-    item.grantzyValue = getGrantzyValueByKey(selectedKey);
-
-    if (isDropdownField(item.field)) {
-        const optionMatch = resolveOptionMatch(item.field, item.grantzyValue);
-        item.dropdownOption = optionMatch.option;
-        item.confidence = Math.max(0.7, optionMatch.confidence || 0.7);
-        item.status = optionMatch.confidence >= 0.9 ? 'manual' : 'needs_review';
-        item.reason = optionMatch.reason;
-    } else {
-        item.dropdownOption = null;
-        item.confidence = 1;
-        item.status = 'manual';
-        item.reason = 'manually_mapped';
-    }
-
-    item.enabled = true;
-}
-
-function renderFillPlan() {
-    autofillPreviewEl.innerHTML = '';
-    autofillPreviewEl.hidden = false;
-
-    if (!currentFillPlan.length) {
-        autofillPreviewEl.hidden = true;
-        updateActionButtons();
-        return;
-    }
-
-    currentFillPlan.forEach((item, index) => {
-        const row = document.createElement('div');
-        row.className = 'preview-row';
-
-        const includeCheckbox = document.createElement('input');
-        includeCheckbox.type = 'checkbox';
-        includeCheckbox.checked = Boolean(item.enabled);
-        includeCheckbox.disabled = !item.grantzyKey;
-        includeCheckbox.addEventListener('change', () => {
-            item.enabled = includeCheckbox.checked;
-            updateActionButtons();
-        });
-
-        const main = document.createElement('div');
-        main.className = 'preview-main';
-
-        const header = document.createElement('div');
-        header.className = 'preview-header';
-
-        const label = document.createElement('strong');
-        label.textContent = item.fieldLabel || t('field_label_with_index', { index: index + 1 });
-        header.appendChild(label);
-        header.appendChild(statusBadge(item.status));
-
-        const meta = document.createElement('div');
-        meta.textContent = t('confidence_widget_kind', {
-            confidence: (item.confidence * 100).toFixed(0),
-            widgetKind: item.field.widgetKind
-        });
-
-        const controls = document.createElement('div');
-        controls.className = 'preview-controls';
-
-        const select = document.createElement('select');
-        const emptyOption = document.createElement('option');
-        emptyOption.value = '';
-        emptyOption.textContent = t('skip_field');
-        select.appendChild(emptyOption);
-
-        getSelectableOptions(item).forEach(key => {
-            const option = document.createElement('option');
-            option.value = key;
-            option.textContent = key;
-            if (item.grantzyKey === key) {
-                option.selected = true;
-            }
-            select.appendChild(option);
-        });
-
-        select.addEventListener('change', () => {
-            applyManualMapping(item, select.value);
-            renderFillPlan();
-        });
-
-        controls.appendChild(select);
-
-        const valuePreview = document.createElement('small');
-        valuePreview.textContent = t('value_preview', {
-            value: item.grantzyValue || t('none')
-        });
-
-        main.appendChild(header);
-        main.appendChild(meta);
-        main.appendChild(controls);
-        main.appendChild(valuePreview);
-
-        if (isDropdownField(item.field)) {
-            const dropdownNote = document.createElement('small');
-            dropdownNote.textContent = item.dropdownOption
-                ? t('option_label', { option: item.dropdownOption.text || item.dropdownOption.value })
-                : t('option_not_matched');
-            main.appendChild(dropdownNote);
-        }
-
-        const reason = document.createElement('small');
-        reason.textContent = t('reason_label', {
-            reason: item.reason || t('not_available')
-        });
-        main.appendChild(reason);
-
-        row.appendChild(includeCheckbox);
-        row.appendChild(main);
-        autofillPreviewEl.appendChild(row);
-    });
-
-    updateActionButtons();
-}
-
 function renderFillReport(results = []) {
     autofillReportEl.innerHTML = '';
     autofillReportEl.hidden = false;
@@ -993,10 +773,9 @@ function renderFillReport(results = []) {
 function resetAutofillState() {
     latestScan = null;
     currentFillPlan = [];
+    activeFillSession = 0;
     autofillReportEl.textContent = '';
     autofillReportEl.hidden = true;
-    autofillPreviewEl.textContent = '';
-    autofillPreviewEl.hidden = true;
     updateActionButtons();
 }
 
@@ -1030,11 +809,9 @@ async function analyzeCurrentForm({ skipPermissionCheck = false } = {}) {
         }
     }
 
-    setBusyState(true);
     setAutofillStatus(t('analyzing_fields_current_tab'));
 
     const response = await sendRuntimeMessage({ action: 'scanFormInActiveTab' });
-    setBusyState(false);
 
     if (!response.success) {
         setAutofillStatus(response.error || t('could_not_analyze_form'), 'error');
@@ -1050,110 +827,19 @@ async function analyzeCurrentForm({ skipPermissionCheck = false } = {}) {
 
     if (!latestScan.fields.length) {
         setAutofillStatus(t('no_fillable_fields_detected'), 'error');
-        renderFillReport([]);
         currentFillPlan = [];
-        renderFillPlan();
         return false;
-    } else {
-        setAutofillStatus(t('detected_fields_click_fill_or_preview', { count: latestScan.fields.length }), 'success');
     }
 
-    renderFillReport([]);
     currentFillPlan = [];
-    renderFillPlan();
     return true;
 }
 
-async function previewFillPlan({ skipPermissionCheck = false, suppressPreviewStatus = false } = {}) {
-    if (!flatGrantzyFields.length) {
-        await refreshFlatGrantzyFields();
-    }
-
-    if (!flatGrantzyFields.length) {
-        setAutofillStatus(t('no_application_data_loaded_select_first'), 'error');
-        return false;
-    }
-
-    if (!latestScan?.fields?.length) {
-        const analyzed = await analyzeCurrentForm({ skipPermissionCheck });
-        if (!analyzed || !latestScan?.fields?.length) {
-            return false;
-        }
-    }
-
-    setBusyState(true);
-    if (!suppressPreviewStatus) {
-        setAutofillStatus(t('building_autofill_preview'));
-    }
-
-    const memory = await loadMappingMemory(latestScan.origin, latestScan.formFingerprint);
-    let usedFallback = false;
-    let fallbackReason = '';
-
-    if (selectedApplication?.uuid) {
-        const aiResponse = await sendRuntimeMessage({
-            action: 'matchFormFieldsWithAi',
-            applicationId: selectedApplication.uuid,
-            origin: latestScan.origin,
-            url: latestScan.url,
-            formFingerprint: latestScan.formFingerprint,
-            fields: latestScan.fields,
-            memoryHints: buildMemoryHints(memory)
-        });
-
-        if (aiResponse.success && Array.isArray(aiResponse.items) && aiResponse.items.length) {
-            currentFillPlan = buildAiFillPlan(aiResponse.items, latestScan.fields);
-        } else {
-            usedFallback = true;
-            fallbackReason = aiResponse.error || t('ai_matching_unavailable');
-            currentFillPlan = buildFallbackFillPlan(memory);
-        }
-    } else {
-        usedFallback = true;
-        fallbackReason = t('no_selected_application_for_ai');
-        currentFillPlan = buildFallbackFillPlan(memory);
-    }
-
-    setBusyState(false);
-    renderFillPlan();
-
-    const autoCount = currentFillPlan.filter(item => item.status === 'auto').length;
-    const reviewCount = currentFillPlan.filter(item => item.status === 'needs_review').length;
-    const skippedCount = currentFillPlan.filter(item => item.status === 'skipped').length;
-
-    if (usedFallback) {
-        if (!suppressPreviewStatus) {
-            setAutofillStatus(
-                t('ai_unavailable_using_fallback_preview_ready', {
-                    reason: fallbackReason,
-                    autoCount,
-                    reviewCount,
-                    skippedCount
-                }),
-                'success'
-            );
-        }
-        return true;
-    }
-
-    if (!suppressPreviewStatus) {
-        setAutofillStatus(
-            t('ai_preview_ready', {
-                autoCount,
-                reviewCount,
-                skippedCount
-            }),
-            'success'
-        );
-    }
-    return true;
-}
-
-async function applyFillPlanToTab({ skipPermissionCheck = false } = {}) {
+async function applyFillPlanToTab({ skipPermissionCheck = false, skipBusyState = false } = {}) {
     const selectedItems = currentFillPlan.filter(item => item.enabled && item.grantzyKey);
 
     if (!selectedItems.length) {
-        setAutofillStatus(t('select_at_least_one_field_to_fill'), 'error');
+        setAutofillStatus(t('no_fields_matched'), 'error');
         return;
     }
 
@@ -1164,7 +850,9 @@ async function applyFillPlanToTab({ skipPermissionCheck = false } = {}) {
         }
     }
 
-    setBusyState(true);
+    if (!skipBusyState) {
+        setBusyState(true);
+    }
     setAutofillStatus(t('applying_fields_count', { count: selectedItems.length }));
 
     const response = await sendRuntimeMessage({
@@ -1172,7 +860,9 @@ async function applyFillPlanToTab({ skipPermissionCheck = false } = {}) {
         planItems: selectedItems
     });
 
-    setBusyState(false);
+    if (!skipBusyState) {
+        setBusyState(false);
+    }
 
     if (!response.success) {
         setAutofillStatus(response.error || t('failed_to_apply_fill_plan'), 'error');
@@ -1207,7 +897,6 @@ async function applyFillPlanToTab({ skipPermissionCheck = false } = {}) {
                 formUrl: latestScan.url || null
             }
         );
-        await renderRecentMappingsList();
     }
 
     const filledCount = results.filter(result => result.status === 'filled').length;
@@ -1234,18 +923,113 @@ async function fillAllWithConfidenceTiers() {
         return;
     }
 
-    if (!currentFillPlan.length) {
-        setAutofillStatus(t('preparing_one_click_fill_all'));
-        const hasPlan = await previewFillPlan({
-            skipPermissionCheck: true,
-            suppressPreviewStatus: true
-        });
-        if (!hasPlan || !currentFillPlan.length) {
+    setBusyState(true);
+
+    try {
+        setAutofillStatus(t('magic_fill_scanning'));
+
+        if (!flatGrantzyFields.length) {
+            await refreshFlatGrantzyFields();
+        }
+        if (!flatGrantzyFields.length) {
+            setAutofillStatus(t('no_application_data_loaded_select_first'), 'error');
             return;
         }
-    }
 
-    await applyFillPlanToTab({ skipPermissionCheck: true });
+        const analyzed = await analyzeCurrentForm({ skipPermissionCheck: true });
+        if (!analyzed || !latestScan?.fields?.length) {
+            return;
+        }
+
+        setAutofillStatus(t('magic_fill_matching'));
+
+        const fillSessionId = Date.now();
+        activeFillSession = fillSessionId;
+
+        const memory = await loadMappingMemory(latestScan.origin, latestScan.formFingerprint);
+        const memoryHints = buildMemoryHints(memory);
+        const hasMemory = memoryHints.length > 0;
+
+        if (hasMemory) {
+            currentFillPlan = buildFallbackFillPlan(memory);
+            const memoryMatchedCount = currentFillPlan.filter(item => item.enabled && item.grantzyKey).length;
+
+            if (memoryMatchedCount > 0) {
+                setAutofillStatus(t('magic_fill_filling'));
+                await applyFillPlanToTab({ skipPermissionCheck: true, skipBusyState: true });
+
+                if (selectedApplication?.uuid) {
+                    const filledSignatures = new Set(
+                        currentFillPlan
+                            .filter(item => item.enabled && item.grantzyKey)
+                            .map(item => item.fieldSignature)
+                    );
+                    const unmatchedFields = latestScan.fields.filter(
+                        field => !filledSignatures.has(field.signature)
+                    );
+
+                    if (unmatchedFields.length > 0) {
+                        const savedSession = fillSessionId;
+                        sendRuntimeMessage({
+                            action: 'matchFormFieldsWithAi',
+                            applicationId: selectedApplication.uuid,
+                            origin: latestScan.origin,
+                            url: latestScan.url,
+                            formFingerprint: latestScan.formFingerprint,
+                            fields: unmatchedFields,
+                            memoryHints
+                        }).then(async (aiResponse) => {
+                            if (activeFillSession !== savedSession) return;
+                            if (aiResponse.success && Array.isArray(aiResponse.items) && aiResponse.items.length) {
+                                const extraPlan = buildAiFillPlan(aiResponse.items, unmatchedFields);
+                                const extraItems = extraPlan.filter(item => item.enabled && item.grantzyKey);
+                                if (extraItems.length > 0) {
+                                    const previousPlan = currentFillPlan;
+                                    currentFillPlan = extraItems;
+                                    await applyFillPlanToTab({ skipPermissionCheck: true });
+                                    currentFillPlan = [...previousPlan, ...extraItems];
+                                }
+                            }
+                        }).catch(() => {});
+                    }
+                }
+
+                return;
+            }
+        }
+
+        if (selectedApplication?.uuid) {
+            const aiResponse = await sendRuntimeMessage({
+                action: 'matchFormFieldsWithAi',
+                applicationId: selectedApplication.uuid,
+                origin: latestScan.origin,
+                url: latestScan.url,
+                formFingerprint: latestScan.formFingerprint,
+                fields: latestScan.fields,
+                memoryHints
+            });
+
+            if (aiResponse.success && Array.isArray(aiResponse.items) && aiResponse.items.length) {
+                currentFillPlan = buildAiFillPlan(aiResponse.items, latestScan.fields);
+            } else {
+                currentFillPlan = buildFallbackFillPlan(memory);
+            }
+        } else {
+            currentFillPlan = buildFallbackFillPlan(memory);
+        }
+
+        if (!currentFillPlan.length || !currentFillPlan.some(item => item.enabled && item.grantzyKey)) {
+            setAutofillStatus(t('no_fields_matched'), 'error');
+            return;
+        }
+
+        setAutofillStatus(t('magic_fill_filling'));
+        await applyFillPlanToTab({ skipPermissionCheck: true, skipBusyState: true });
+    } catch (error) {
+        setAutofillStatus(error?.message || t('failed_to_apply_fill_plan'), 'error');
+    } finally {
+        setBusyState(false);
+    }
 }
 
 async function undoLastFill() {
@@ -1278,7 +1062,8 @@ function renderTree(data) {
 
     entries.forEach(item => {
         const rawChildData = item.value;
-        const hasChildren = Boolean(
+        const isFileField = item.value_type === 'file';
+        const hasChildren = !isFileField && Boolean(
             rawChildData
             && typeof rawChildData === 'object'
             && (Array.isArray(rawChildData) ? rawChildData.length : Object.keys(rawChildData).length)
@@ -1308,8 +1093,9 @@ function renderTree(data) {
             event.stopPropagation();
 
             if (!hasChildren) {
-                const leafNodeData = [{ key: item.key, value: item.value }];
-                setSelectedTreeNode(leafNodeData, li);
+                const leafEntry = { key: item.key, value: item.value };
+                if (item.value_type) leafEntry.value_type = item.value_type;
+                setSelectedTreeNode([leafEntry], li);
                 return;
             }
 
@@ -1351,6 +1137,161 @@ function renderTree(data) {
     });
 
     return ul;
+}
+
+let sidebarTreeData = null;
+let sidebarTreeContainer = null;
+
+function normalizeTreeEntries(data) {
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === 'object') {
+        return Object.keys(data).map(key => ({ key, value: data[key] }));
+    }
+    return [];
+}
+
+function treeEntryMatches(entry, query) {
+    if (String(entry.key || '').toLowerCase().includes(query)) return true;
+    const value = entry.value;
+    if (value && typeof value !== 'object') {
+        return String(value).toLowerCase().includes(query);
+    }
+    return false;
+}
+
+function treeHasDescendantMatch(entries, query) {
+    for (const entry of entries) {
+        if (treeEntryMatches(entry, query)) return true;
+        if (entry.value && typeof entry.value === 'object') {
+            const children = normalizeTreeEntries(entry.value);
+            if (children.length && treeHasDescendantMatch(children, query)) return true;
+        }
+    }
+    return false;
+}
+
+function highlightText(text, query) {
+    const lower = text.toLowerCase();
+    const idx = lower.indexOf(query);
+    if (idx === -1) return document.createTextNode(text);
+    const span = document.createElement('span');
+    span.appendChild(document.createTextNode(text.slice(0, idx)));
+    const mark = document.createElement('mark');
+    mark.textContent = text.slice(idx, idx + query.length);
+    span.appendChild(mark);
+    span.appendChild(document.createTextNode(text.slice(idx + query.length)));
+    return span;
+}
+
+function renderFilteredTree(data, query) {
+    const ul = document.createElement('ul');
+    const entries = normalizeTreeEntries(data);
+
+    entries.forEach(item => {
+        const rawChildData = item.value;
+        const isFileField = item.value_type === 'file';
+        const hasChildren = !isFileField && Boolean(
+            rawChildData
+            && typeof rawChildData === 'object'
+            && (Array.isArray(rawChildData) ? rawChildData.length : Object.keys(rawChildData).length)
+        );
+
+        const selfMatches = treeEntryMatches(item, query);
+        const childEntries = hasChildren ? normalizeTreeEntries(rawChildData) : [];
+        const hasChildMatch = hasChildren && treeHasDescendantMatch(childEntries, query);
+
+        if (!selfMatches && !hasChildMatch) return;
+
+        const li = document.createElement('li');
+        li.dataset.expanded = hasChildren ? 'true' : 'leaf';
+
+        const labelButton = document.createElement('button');
+        labelButton.type = 'button';
+        labelButton.className = 'tree-label';
+
+        const caret = document.createElement('span');
+        caret.className = hasChildren ? 'tree-caret' : 'tree-caret leaf';
+        caret.textContent = hasChildren ? '▸' : '•';
+        labelButton.appendChild(caret);
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'tree-label-text';
+        textSpan.title = item.key;
+        if (selfMatches && item.key.toLowerCase().includes(query)) {
+            textSpan.appendChild(highlightText(item.key, query));
+        } else {
+            textSpan.textContent = item.key;
+        }
+        labelButton.appendChild(textSpan);
+        li.appendChild(labelButton);
+
+        labelButton.addEventListener('click', event => {
+            event.stopPropagation();
+            if (!hasChildren) {
+                const leafEntry = { key: item.key, value: item.value };
+                if (item.value_type) leafEntry.value_type = item.value_type;
+                setSelectedTreeNode([leafEntry], li);
+                return;
+            }
+            if (li.dataset.expanded === 'true') {
+                const childUl = Array.from(li.children).find(
+                    child => child.tagName && child.tagName.toLowerCase() === 'ul'
+                );
+                if (childUl) li.removeChild(childUl);
+                li.dataset.expanded = 'false';
+            } else {
+                const childUl = selfMatches
+                    ? renderTree(normalizeTreeEntries(rawChildData))
+                    : renderFilteredTree(rawChildData, query);
+                li.appendChild(childUl);
+                li.dataset.expanded = 'true';
+            }
+            setSelectedTreeNode(item.value, li);
+        });
+
+        if (hasChildren) {
+            if (selfMatches && !hasChildMatch) {
+                li.dataset.expanded = 'false';
+            } else if (selfMatches) {
+                const childUl = renderTree(normalizeTreeEntries(rawChildData));
+                li.appendChild(childUl);
+            } else {
+                const childUl = renderFilteredTree(rawChildData, query);
+                li.appendChild(childUl);
+            }
+        }
+
+        ul.appendChild(li);
+    });
+
+    return ul;
+}
+
+function filterSidebarTree(container, query) {
+    if (!sidebarTreeData) return;
+
+    container.innerHTML = '';
+
+    if (!query) {
+        const tree = renderTree(sidebarTreeData);
+        if (tree.querySelector('li')) {
+            container.appendChild(tree);
+        } else {
+            const noData = document.createElement('p');
+            noData.textContent = t('no_groups_found');
+            container.appendChild(noData);
+        }
+        return;
+    }
+
+    const filteredTree = renderFilteredTree(sidebarTreeData, query);
+    if (filteredTree.querySelector('li')) {
+        container.appendChild(filteredTree);
+    } else {
+        const noResults = document.createElement('p');
+        noResults.textContent = t('no_values_found_for_search');
+        container.appendChild(noResults);
+    }
 }
 
 function setSelectedTreeNode(data, liElement) {
@@ -1441,7 +1382,6 @@ function updateSidebar(nextSelectedApplication) {
         clearSelectedTreeNode();
     }
 
-    containerEl.classList.toggle('has-selected-application', Boolean(selectedApplication));
     updateApplicationsCardHeader(selectedApplication);
 
     if (selectedApplication) {
@@ -1454,20 +1394,40 @@ function updateSidebar(nextSelectedApplication) {
         }
 
         sidebarEl.innerHTML = '';
+
+        const filterInput = document.createElement('input');
+        filterInput.type = 'text';
+        filterInput.className = 'sidebar-filter-input';
+        filterInput.placeholder = t('filter_tree');
+        filterInput.setAttribute('aria-label', t('filter_tree'));
+        sidebarEl.appendChild(filterInput);
+
+        const treeContainer = document.createElement('div');
+        treeContainer.className = 'sidebar-tree-container';
+        sidebarEl.appendChild(treeContainer);
+
+        filterInput.addEventListener('input', () => {
+            const query = filterInput.value.trim().toLowerCase();
+            filterSidebarTree(treeContainer, query);
+        });
+
+        sidebarTreeContainer = treeContainer;
         storageGet('selectedApplicationData').then(data => {
             if (data.selectedApplicationData?.fields) {
-                const tree = renderTree(data.selectedApplicationData.fields);
+                sidebarTreeData = data.selectedApplicationData.fields;
+                const tree = renderTree(sidebarTreeData);
                 if (tree.querySelector('li')) {
-                    sidebarEl.appendChild(tree);
+                    treeContainer.appendChild(tree);
                 } else {
                     const noTreeData = document.createElement('p');
                     noTreeData.textContent = t('no_groups_found');
-                    sidebarEl.appendChild(noTreeData);
+                    treeContainer.appendChild(noTreeData);
                 }
             } else {
+                sidebarTreeData = null;
                 const noData = document.createElement('p');
                 noData.textContent = t('no_data_available');
-                sidebarEl.appendChild(noData);
+                treeContainer.appendChild(noData);
             }
         });
 
@@ -1520,8 +1480,6 @@ function openGrantzySettings() {
     chrome.tabs.create({ url });
 }
 
-analyzeFormButton.addEventListener('click', analyzeCurrentForm);
-previewFillButton.addEventListener('click', previewFillPlan);
 applyFillButton.addEventListener('click', fillAllWithConfidenceTiers);
 undoFillButton.addEventListener('click', undoLastFill);
 
@@ -1577,16 +1535,31 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
         return;
     }
 
+    if (changes.grantzyPreloadingSpace?.newValue) {
+        await setActiveView('applications');
+        resultsContainer.innerHTML = '';
+        searchInput.disabled = true;
+        const loader = document.createElement('div');
+        loader.className = 'loader';
+        loader.textContent = t('loading_application_fields');
+        resultsContainer.appendChild(loader);
+        setAutofillStatus(t('loading_application_fields'));
+    }
+
     if (changes.selectedApplication) {
         const previousApplicationUuid = selectedApplication?.uuid || null;
         const nextApplication = changes.selectedApplication.newValue || null;
-        updateSidebar(nextApplication);
         const nextApplicationUuid = nextApplication?.uuid || null;
+        if (nextApplication) {
+            await setActiveView('applications');
+        }
+        updateSidebar(nextApplication);
         if (previousApplicationUuid !== nextApplicationUuid) {
             flatGrantzyFields = [];
             resetAutofillState();
             setAutofillIdleStatus();
         }
+        resultsContainer.innerHTML = '';
         if (nextApplication) {
             await recordRecentApplication(nextApplication);
             await renderRecentApplicationsList();
@@ -1597,6 +1570,14 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
         await refreshFlatGrantzyFields();
         const data = await storageGet('selectedApplication');
         updateSidebar(data.selectedApplication);
+        if (data.selectedApplication?.uuid) {
+            resultsContainer.innerHTML = '';
+            await new Promise(resolve => {
+                setupDataSearch(searchInput, resultsContainer, data.selectedApplication.uuid, widgetEl, () => resolve());
+            });
+            searchInput.disabled = false;
+            searchInput.value = '';
+        }
         if (!latestScan && !currentFillPlan.length && !isBusy) {
             setAutofillIdleStatus();
         }
@@ -1661,8 +1642,8 @@ for (const [key, el] of Object.entries(collapsibleEls)) {
 }
 
 (async () => {
-    const data = await storageGet('selectedApplication');
-    updateSidebar(data.selectedApplication);
+    const initData = await storageGet(['selectedApplication', 'grantzyPreloadingSpace']);
+    updateSidebar(initData.selectedApplication);
     await loadCollapseState();
     await refreshFlatGrantzyFields();
     resetAutofillState();
@@ -1673,4 +1654,24 @@ for (const [key, el] of Object.entries(collapsibleEls)) {
     await refreshConnectionStatus({ withSpinner: false });
     await renderQuickAccessPanel();
     applyViewVisibility();
+
+    if (initData.grantzyPreloadingSpace && !initData.selectedApplication) {
+        resultsContainer.innerHTML = '';
+        searchInput.disabled = true;
+        const loader = document.createElement('div');
+        loader.className = 'loader';
+        loader.textContent = t('loading_application_fields');
+        resultsContainer.appendChild(loader);
+        setAutofillStatus(t('loading_application_fields'));
+        setTimeout(() => {
+            storageGet('grantzyPreloadingSpace').then(data => {
+                if (data.grantzyPreloadingSpace) {
+                    chrome.storage.local.remove('grantzyPreloadingSpace');
+                    searchInput.disabled = false;
+                }
+            });
+        }, 60000);
+    } else if (initData.grantzyPreloadingSpace) {
+        chrome.storage.local.remove('grantzyPreloadingSpace');
+    }
 })();

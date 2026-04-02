@@ -60,8 +60,11 @@ function shouldDisplayDataRow(result) {
         return false;
     }
 
-    // Internal helper field that usually expands to a huge structural list.
     if (key.includes('hidden fields choice')) {
+        return false;
+    }
+
+    if (result.value_type === 'file' && (!Array.isArray(result.value) || !result.value.length)) {
         return false;
     }
 
@@ -503,13 +506,18 @@ export function updateResultsContainer(container, data, contextHolder, searchInp
 
         const normalizedQuery = normalizeString(query);
         const rankedResults = dataToSearch
-            .map(item => ({
-                item,
-                relevance: Math.max(
-                    calculateRelevance(normalizedQuery, normalizeString(item.key)),
-                    calculateRelevance(normalizedQuery, normalizeString(formatDataValue(item.value)))
-                )
-            }))
+            .map(item => {
+                const valueText = item.value_type === 'file'
+                    ? (Array.isArray(item.value) ? item.value.map(f => f.name || '').join(' ') : '')
+                    : formatDataValue(item.value);
+                return {
+                    item,
+                    relevance: Math.max(
+                        calculateRelevance(normalizedQuery, normalizeString(item.key)),
+                        calculateRelevance(normalizedQuery, normalizeString(valueText))
+                    )
+                };
+            })
             .filter(result => result.relevance >= 1.1)
             .sort((a, b) => b.relevance - a.relevance);
         updateDataResults(container, rankedResults.map(entry => entry.item));
@@ -538,6 +546,51 @@ function showToast(message, duration = 2200) {
     }, duration);
 }
 
+function formatFileSize(bytes) {
+    if (!bytes || bytes < 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderFileResults(container, result, isFirst) {
+    const files = Array.isArray(result.value) ? result.value : [];
+    files.forEach((file, fileIndex) => {
+        const sizeLabel = formatFileSize(file.size);
+        const displayValue = sizeLabel ? `${file.name} (${sizeLabel})` : file.name;
+        const resultItem = createResultItem(result.key, displayValue, {
+            metadata: t('click_to_download_file'),
+            displayValue
+        });
+        resultItem.classList.add('result-item-file');
+
+        resultItem.addEventListener('click', async () => {
+            resultItem.classList.add('downloading');
+            try {
+                const response = await sendRuntimeMessage({
+                    action: 'downloadFile',
+                    fileUuid: file.uuid,
+                    fileName: file.name
+                });
+                showToast(response.success ? t('download_started') : (response.error || t('download_failed')));
+            } catch (_error) {
+                showToast(t('download_failed'));
+            } finally {
+                resultItem.classList.remove('downloading');
+            }
+        });
+
+        resultItem.addEventListener('mouseover', () => {
+            setHoveredResult(resultItem, container);
+        });
+
+        container.appendChild(resultItem);
+        if (isFirst && fileIndex === 0) {
+            setHoveredResult(resultItem, container);
+        }
+    });
+}
+
 export function updateDataResults(container, results) {
     container.innerHTML = '';
     const normalizedResults = Array.isArray(results)
@@ -550,6 +603,11 @@ export function updateDataResults(container, results) {
     }
 
     normalizedResults.forEach((result, index) => {
+        if (result.value_type === 'file') {
+            renderFileResults(container, result, index === 0);
+            return;
+        }
+
         const resultValue = formatDataValue(result.value);
         const displayValue = compactDisplayValue(resultValue);
         const resultItem = createResultItem(result.key, resultValue, {
@@ -675,6 +733,11 @@ export function flattenFields(fields, parentKey = '', result = []) {
         fields.forEach(item => {
             const keyPart = item && typeof item === 'object' ? String(item.key || '') : '';
             const newKey = parentKey ? `${parentKey}.${keyPart}` : keyPart;
+
+            if (item && typeof item === 'object' && item.value_type === 'file') {
+                result.push({ key: newKey, value: item.value, value_type: 'file' });
+                return;
+            }
 
             if (item && typeof item === 'object' && Object.prototype.hasOwnProperty.call(item, 'value')) {
                 if (Array.isArray(item.value)) {
