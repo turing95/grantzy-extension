@@ -611,7 +611,6 @@ export function updateDataResults(container, results) {
         const resultValue = formatDataValue(result.value);
         const displayValue = compactDisplayValue(resultValue);
         const resultItem = createResultItem(result.key, resultValue, {
-            metadata: t('click_to_copy_value'),
             displayValue
         });
 
