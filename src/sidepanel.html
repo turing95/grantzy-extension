@@ -38,6 +38,7 @@
             <div class="view-switcher">
                 <button id="show-applications-view-btn" type="button" class="active">Pratiche</button>
                 <button id="show-quick-access-view-btn" type="button">Accesso Rapido</button>
+                <button id="show-scan-platform-view-btn" type="button" hidden>Scan piattaforma</button>
                 <button id="show-settings-view-btn" type="button">Impostazioni</button>
             </div>
             <label for="app-search-input" class="sr-only">Cerca pratiche</label>
@@ -49,7 +50,14 @@
                 <article id="applications-data-card" class="panel-card">
                     <header class="panel-card-header">
                         <div class="panel-card-header-main">
-                            <h3 id="applications-card-title">Lista pratiche</h3>
+                            <div class="panel-card-title-row">
+                                <h3 id="applications-card-title">Lista pratiche</h3>
+                                <button id="refresh-data-btn" class="refresh-data-btn" type="button" hidden aria-label="Aggiorna dati" title="Aggiorna dati">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="14" height="14">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M20.016 4.66v4.993"/>
+                                    </svg>
+                                </button>
+                            </div>
                             <p id="applications-card-subtitle">Scegli una pratica per caricarne i campi.</p>
                         </div>
                         <button id="clear-data-scope-btn" class="panel-header-action" type="button" hidden>Mostra tutti i campi</button>
@@ -84,6 +92,59 @@
                         <div id="recent-applications-list" class="quick-list"></div>
                     </article>
                 </div>
+            </section>
+
+            <section id="scan-platform-view" class="panel-view">
+                <article class="settings-card">
+                    <h3>Scan piattaforma</h3>
+                    <p id="scan-intro" class="widget-subtitle">Mappa la struttura dei campi di un portale grant.</p>
+
+                    <div id="scan-load-block" class="mt-10">
+                        <label for="scan-run-uuid-input" class="sr-only">ID scan run</label>
+                        <input type="text" id="scan-run-uuid-input" placeholder="Incolla qui l'UUID della scan run"
+                               class="settings-input"
+                               autocomplete="off" spellcheck="false"/>
+                        <div class="inline-actions mt-8">
+                            <button id="scan-load-run-btn" type="button">Carica run</button>
+                        </div>
+                        <div id="scan-load-status" class="settings-status mt-8" role="status" aria-live="polite"></div>
+                    </div>
+
+                    <div id="scan-active-block" hidden>
+                        <div class="settings-meta mt-10">
+                            <div><strong id="scan-active-bando"></strong></div>
+                            <div id="scan-active-fillable" class="text-muted"></div>
+                            <div id="scan-active-portal" class="text-muted"></div>
+                            <div id="scan-active-progress" class="text-muted"></div>
+                            <div id="scan-active-tab" class="text-muted"></div>
+                        </div>
+
+                        <div class="mt-10">
+                            <label for="scan-capture-context" class="text-muted">Descrivi questa cattura (opzionale, ma migliora la qualità)</label>
+                            <textarea id="scan-capture-context"
+                                      class="settings-input mt-4"
+                                      rows="2"
+                                      placeholder="es. Modale Aggiungi socio fisico (dentro Compagine sociale)"
+                                      autocomplete="off"
+                                      spellcheck="false"></textarea>
+                        </div>
+                        <div class="autofill-actions mt-10">
+                            <button id="scan-capture-btn" type="button" class="magic-fill-btn">📸 Cattura questa pagina</button>
+                        </div>
+                        <div id="scan-capture-status" role="status" aria-live="polite" class="mt-8"></div>
+
+                        <div id="scan-recent-captures-wrap" class="mt-10" hidden>
+                            <div class="settings-meta"><strong>Ultime catture</strong></div>
+                            <div id="scan-recent-captures-list" class="quick-list mt-8"></div>
+                        </div>
+
+                        <div class="inline-actions mt-10">
+                            <button id="scan-terminate-btn" type="button">✅ Termina scan e salva</button>
+                            <button id="scan-restart-btn" type="button">🔄 Ricomincia da zero</button>
+                            <button id="scan-clear-run-btn" type="button">Cambia run</button>
+                        </div>
+                    </div>
+                </article>
             </section>
 
             <section id="settings-view" class="panel-view">

@@ -1,8 +1,43 @@
-# AGENTS.md
+# CLAUDE.md — Grantzy Extension
+
+Canonical machine-optimized context for this repository.
 
 This repo contains a Chrome/Chromium **Manifest V3** extension named **"Grantzy form assistant"** that **fills web forms with data from Grantzy applications/spaces**.
 
 It provides a **Side Panel** UI as the primary surface, plus content scripts for the grantzy.com web-app bridge and on-demand form filling.
+
+## Working mode: AI-only repo
+Only Claude Code works on this codebase. Optimize for:
+- **Correctness and speed of iteration**, not readability aesthetics.
+- **Grepability**: descriptive names, skip ceremonial docstrings and comments that explain "what". Comment only "why" when non-obvious.
+- **Minimal ceremony**: keep diffs small and functional.
+- **Tests over docs**: correctness is enforced by tests, not documentation.
+
+## Hard rules (do not break)
+- **Testing is mandatory.** Every non-trivial change MUST be verified before declaring done:
+  1. `npm run check` (lint + unit tests) must pass.
+  2. `npm run test:visual` (Playwright smoke test) must pass — visually confirm screenshots.
+  3. For UI/UX changes: add test data to `scripts/test-sidepanel.mjs` that exercises the change, take screenshots, and verify them.
+  4. For pure logic changes: add or update unit tests in `tests/*.test.mjs`.
+  5. Never skip tests. Never declare a task done without running them.
+- **Never assume existing code is correct or optimal.** Every line is fair game for rewrite. If existing code is buggy, fix it — don't build on broken foundations.
+- **No parallel implementations.** Before creating something new, check if an existing equivalent exists. Extend it, don't duplicate.
+- **No new frameworks/libraries** unless explicitly requested.
+- **All user-facing strings in Italian** via `src/i18n.js` using `t()`. No hardcoded strings in JS.
+- **Styles live in `styles/sidepanel.css`**, not inline in JS. Side panel HTML has its own `<style>` blocks in `sidepanel.html`.
+- **Shared utilities**: use imports from `utils.js` — do NOT duplicate `sendRuntimeMessage`, `storageGet/Set`, `levenshteinDistance`, etc.
+
+## Test infrastructure
+| Command | What it does |
+|---|---|
+| `npm test` | Node.js native test runner (`node --test tests/*.test.mjs`) |
+| `npm run lint` | ESLint on `src/**/*.js` and `tests/**/*.test.mjs` |
+| `npm run check` | Lint + tests combined |
+| `npm run test:visual` | Playwright smoke test — launches Chromium with extension, seeds test data, takes screenshots to `.test-screenshots/` |
+
+- Unit tests use `node:test` + `node:assert/strict`. Files: `tests/*.test.mjs`.
+- Visual test script: `scripts/test-sidepanel.mjs`. Seeds `chrome.storage.local` with fake data and screenshots the side panel.
+- When adding UI features, extend the visual test's seed data to cover the new feature and verify the screenshot.
 
 ---
 
@@ -203,6 +238,7 @@ Note: `formFiller.content.js` and `webappBridge.js` are NOT bundled — they are
 
 - Keep diffs small and focused.
 - After modifying bundled `src/*` files, rebuild with `npm run build`.
+- **Run `npm run check` before declaring any task done.** No exceptions.
+- **Run `npm run test:visual` for UI changes** and verify screenshots.
 - Call out any permission changes in `manifest.json`.
 - `env.js` must only contain a non-secret base URL + optional token.
-- Validate: search/select, tree rendering, autofill flow, clipboard, keyboard nav.

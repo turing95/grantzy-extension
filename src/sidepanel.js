@@ -35,15 +35,38 @@ const headerContextEl = document.getElementById('widget-context');
 const applicationsCardTitleEl = document.getElementById('applications-card-title');
 const applicationsCardSubtitleEl = document.getElementById('applications-card-subtitle');
 const clearDataScopeButton = document.getElementById('clear-data-scope-btn');
+const refreshDataButton = document.getElementById('refresh-data-btn');
 const backButton = document.getElementById('back-button');
 const connectionStatusEl = document.getElementById('connection-status');
 const recheckConnectionBtn = document.getElementById('recheck-connection-btn');
 const applicationsViewButton = document.getElementById('show-applications-view-btn');
 const quickAccessViewButton = document.getElementById('show-quick-access-view-btn');
+const scanPlatformViewButton = document.getElementById('show-scan-platform-view-btn');
 const settingsViewButton = document.getElementById('show-settings-view-btn');
 const applicationsViewEl = document.getElementById('applications-view');
 const quickAccessViewEl = document.getElementById('quick-access-view');
+const scanPlatformViewEl = document.getElementById('scan-platform-view');
 const settingsViewEl = document.getElementById('settings-view');
+
+// Platform Scan elements (staff-only)
+const scanRunUuidInput = document.getElementById('scan-run-uuid-input');
+const scanLoadRunBtn = document.getElementById('scan-load-run-btn');
+const scanLoadStatusEl = document.getElementById('scan-load-status');
+const scanLoadBlockEl = document.getElementById('scan-load-block');
+const scanActiveBlockEl = document.getElementById('scan-active-block');
+const scanActiveBandoEl = document.getElementById('scan-active-bando');
+const scanActiveFillableEl = document.getElementById('scan-active-fillable');
+const scanActivePortalEl = document.getElementById('scan-active-portal');
+const scanActiveProgressEl = document.getElementById('scan-active-progress');
+const scanActiveTabEl = document.getElementById('scan-active-tab');
+const scanCaptureBtn = document.getElementById('scan-capture-btn');
+const scanCaptureContextEl = document.getElementById('scan-capture-context');
+const scanCaptureStatusEl = document.getElementById('scan-capture-status');
+const scanRecentCapturesWrapEl = document.getElementById('scan-recent-captures-wrap');
+const scanRecentCapturesListEl = document.getElementById('scan-recent-captures-list');
+const scanTerminateBtn = document.getElementById('scan-terminate-btn');
+const scanRestartBtn = document.getElementById('scan-restart-btn');
+const scanClearRunBtn = document.getElementById('scan-clear-run-btn');
 const recentApplicationsListEl = document.getElementById('recent-applications-list');
 const settingsConnectionInfoEl = document.getElementById('settings-connection-info');
 const settingsConnectedDetailsEl = document.getElementById('settings-connected-details');
@@ -77,6 +100,13 @@ let activeFillSession = 0;
 let currentView = 'applications';
 let extensionSettings = null;
 let activeApiOriginLabel = '';
+
+// Platform scan state
+let scanRunUuid = '';
+let scanRunInfo = null;
+let scanRecentCaptures = []; // [{ url, added, total, ts, fields:[{label,type}] }]
+let isScanBusy = false;
+const SCAN_RUN_STORAGE_KEY = 'grantzyPlatformScanRunV1';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const RECENT_APPLICATIONS_KEY = 'grantzyRecentApplicationsV1';
@@ -357,6 +387,10 @@ function updateApplicationsCardHeader(nextApplication = null) {
     if (clearDataScopeButton) {
         clearDataScopeButton.hidden = !(nextApplication && selectedTreeNodeData);
     }
+
+    if (refreshDataButton) {
+        refreshDataButton.hidden = !nextApplication;
+    }
 }
 
 function setAutofillIdleStatus() {
@@ -377,10 +411,12 @@ function applyViewVisibility() {
     const isApplicationsView = currentView === 'applications';
     applicationsViewEl?.classList.toggle('active', isApplicationsView);
     quickAccessViewEl?.classList.toggle('active', currentView === 'quick_access');
+    scanPlatformViewEl?.classList.toggle('active', currentView === 'scan_platform');
     settingsViewEl?.classList.toggle('active', currentView === 'settings');
 
     applicationsViewButton?.classList.toggle('active', isApplicationsView);
     quickAccessViewButton?.classList.toggle('active', currentView === 'quick_access');
+    scanPlatformViewButton?.classList.toggle('active', currentView === 'scan_platform');
     settingsViewButton?.classList.toggle('active', currentView === 'settings');
 
     if (searchInput) {
@@ -404,6 +440,8 @@ async function setActiveView(nextView) {
         await renderQuickAccessPanel();
     } else if (nextView === 'settings') {
         await refreshSettingsPanel();
+    } else if (nextView === 'scan_platform') {
+        await renderScanPlatformPanel();
     }
 }
 
@@ -571,6 +609,328 @@ async function refreshSettingsPanel() {
         }
     }
 }
+
+// ------------------------------ Platform Scan ------------------------------
+
+function setScanLoadStatus(message, level = 'neutral') {
+    if (!scanLoadStatusEl) return;
+    scanLoadStatusEl.textContent = message || '';
+    scanLoadStatusEl.classList.remove('settings-status-success', 'settings-status-error', 'settings-status-neutral');
+    scanLoadStatusEl.classList.add(`settings-status-${level}`);
+}
+
+function setScanCaptureStatus(message, level = 'neutral') {
+    if (!scanCaptureStatusEl) return;
+    scanCaptureStatusEl.textContent = message || '';
+    scanCaptureStatusEl.classList.remove('settings-status-success', 'settings-status-error', 'settings-status-neutral');
+    scanCaptureStatusEl.classList.add(`settings-status-${level}`);
+}
+
+function isUuidLike(value) {
+    return UUID_PATTERN.test(String(value || '').trim());
+}
+
+async function refreshScanStaffGating() {
+    if (!scanPlatformViewButton) return false;
+    try {
+        const session = await sendRuntimeMessage({ action: 'getExtensionSession' });
+        const isStaff = Boolean(
+            session?.success && session.session?.user
+            && (session.session.user.is_staff || session.session.user.is_superuser),
+        );
+        scanPlatformViewButton.hidden = !isStaff;
+        return isStaff;
+    } catch (_err) {
+        scanPlatformViewButton.hidden = true;
+        return false;
+    }
+}
+
+function showScanLoadBlock() {
+    scanLoadBlockEl?.removeAttribute('hidden');
+    scanActiveBlockEl?.setAttribute('hidden', '');
+}
+
+function showScanActiveBlock() {
+    scanLoadBlockEl?.setAttribute('hidden', '');
+    scanActiveBlockEl?.removeAttribute('hidden');
+}
+
+async function refreshActiveTabHint() {
+    try {
+        const tabInfo = await sendRuntimeMessage({ action: 'getActiveTabInfo' });
+        if (tabInfo?.success && scanActiveTabEl) {
+            scanActiveTabEl.textContent = t('scan_active_tab_url', { url: tabInfo.url || '' });
+        }
+    } catch (_err) {
+        // best-effort; ignore
+    }
+}
+
+function renderScanRunInfo() {
+    if (!scanRunInfo) return;
+    if (scanActiveBandoEl) {
+        scanActiveBandoEl.textContent = scanRunInfo.bando?.name || '';
+    }
+    if (scanActiveFillableEl) {
+        scanActiveFillableEl.textContent = `${t('scan_run_fillable')}: ${scanRunInfo.fillable?.name || ''}`;
+    }
+    if (scanActivePortalEl) {
+        const url = scanRunInfo.portal_url || '';
+        scanActivePortalEl.innerHTML = '';
+        scanActivePortalEl.appendChild(document.createTextNode(`${t('scan_run_portal')}: `));
+        if (url) {
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            scanActivePortalEl.appendChild(link);
+        } else {
+            scanActivePortalEl.appendChild(document.createTextNode(t('not_available')));
+        }
+    }
+    if (scanActiveProgressEl) {
+        scanActiveProgressEl.textContent = t('scan_run_progress', {
+            captures: scanRunInfo.captures_count || 0,
+            fields: scanRunInfo.fields_count || 0,
+        });
+    }
+}
+
+function renderRecentCaptures() {
+    if (!scanRecentCapturesListEl || !scanRecentCapturesWrapEl) return;
+    if (!scanRecentCaptures.length) {
+        scanRecentCapturesWrapEl.hidden = true;
+        return;
+    }
+    scanRecentCapturesWrapEl.hidden = false;
+    scanRecentCapturesListEl.innerHTML = '';
+    scanRecentCaptures.slice(0, 5).forEach((capture) => {
+        const item = document.createElement('div');
+        item.className = 'quick-card';
+        const head = document.createElement('div');
+        head.innerHTML = `<strong>+${capture.added}</strong> · ${capture.url || ''}`;
+        item.appendChild(head);
+        const fieldsEl = document.createElement('div');
+        fieldsEl.className = 'text-muted';
+        fieldsEl.textContent = (capture.fields || [])
+            .slice(0, 6)
+            .map(f => t('scan_capture_added_field_short', { label: f.label, type: f.type }))
+            .join(' · ');
+        item.appendChild(fieldsEl);
+        scanRecentCapturesListEl.appendChild(item);
+    });
+}
+
+async function loadScanRun(uuid) {
+    setScanLoadStatus(t('scan_loading_run'), 'neutral');
+    if (scanLoadRunBtn) scanLoadRunBtn.disabled = true;
+    try {
+        const response = await sendRuntimeMessage({
+            action: 'platformScanRunInfo',
+            scanRunUuid: uuid,
+        });
+        if (!response?.success) {
+            throw new Error(response?.error || 'unknown error');
+        }
+        const info = response.info;
+        if (info.status !== 'running') {
+            setScanLoadStatus(
+                t('scan_run_invalid_status', { status: info.status }),
+                'error',
+            );
+            return false;
+        }
+        scanRunUuid = uuid;
+        scanRunInfo = info;
+        await storageSet({ [SCAN_RUN_STORAGE_KEY]: { uuid } });
+        renderScanRunInfo();
+        await refreshActiveTabHint();
+        showScanActiveBlock();
+        setScanLoadStatus(t('scan_run_loaded'), 'success');
+        setScanCaptureStatus('', 'neutral');
+        return true;
+    } catch (err) {
+        setScanLoadStatus(t('scan_run_not_found'), 'error');
+        return false;
+    } finally {
+        if (scanLoadRunBtn) scanLoadRunBtn.disabled = false;
+    }
+}
+
+async function captureCurrentPage() {
+    if (!scanRunUuid || isScanBusy) return;
+    isScanBusy = true;
+    if (scanCaptureBtn) scanCaptureBtn.disabled = true;
+    setScanCaptureStatus(t('scan_capturing'), 'neutral');
+    try {
+        // host_permissions: ["<all_urls>"] in manifest covers any portal
+        // domain — no runtime permission request needed.
+        const tabInfo = await sendRuntimeMessage({ action: 'getActiveTabInfo' });
+        if (!tabInfo?.success || !tabInfo.scriptable) {
+            throw new Error(t('open_regular_website_tab_before_autofill'));
+        }
+        const captureContext = (scanCaptureContextEl?.value || '').trim();
+        const response = await sendRuntimeMessage({
+            action: 'platformScanCapture',
+            scanRunUuid,
+            captureContext,
+        });
+        if (!response?.success) {
+            throw new Error(response?.error || 'unknown error');
+        }
+        const capture = response.capture;
+        scanRecentCaptures.unshift({
+            url: capture?.captures_count ? scanRunInfo?.portal_url : '',
+            added: capture.added,
+            total: capture.total,
+            ts: Date.now(),
+            fields: capture.last_added || [],
+        });
+        if (scanRunInfo) {
+            scanRunInfo.fields_count = capture.total;
+            scanRunInfo.captures_count = capture.captures_count || (scanRunInfo.captures_count || 0) + 1;
+        }
+        renderScanRunInfo();
+        renderRecentCaptures();
+        setScanCaptureStatus(
+            t('scan_capture_added', { added: capture.added, total: capture.total }),
+            'success',
+        );
+        // Clear the context field so each capture has its own description
+        if (scanCaptureContextEl) {
+            scanCaptureContextEl.value = '';
+        }
+        await refreshActiveTabHint();
+    } catch (err) {
+        setScanCaptureStatus(
+            t('scan_capture_failed', { error: err.message || 'errore' }),
+            'error',
+        );
+    } finally {
+        if (scanCaptureBtn) scanCaptureBtn.disabled = false;
+        isScanBusy = false;
+    }
+}
+
+async function terminateScanRun() {
+    if (!scanRunUuid || isScanBusy) return;
+    isScanBusy = true;
+    if (scanTerminateBtn) scanTerminateBtn.disabled = true;
+    setScanCaptureStatus(t('scan_terminating'), 'neutral');
+    try {
+        const response = await sendRuntimeMessage({
+            action: 'platformScanCommit',
+            scanRunUuid,
+            status: 'completed',
+        });
+        if (!response?.success) {
+            throw new Error(response?.error || 'unknown error');
+        }
+        setScanCaptureStatus(t('scan_terminated'), 'success');
+        await clearScanRunState({ keepStatus: true });
+    } catch (err) {
+        setScanCaptureStatus(
+            t('scan_terminate_failed', { error: err.message || 'errore' }),
+            'error',
+        );
+    } finally {
+        if (scanTerminateBtn) scanTerminateBtn.disabled = false;
+        isScanBusy = false;
+    }
+}
+
+async function clearScanRunState({ keepStatus = false } = {}) {
+    scanRunUuid = '';
+    scanRunInfo = null;
+    scanRecentCaptures = [];
+    if (scanRunUuidInput) scanRunUuidInput.value = '';
+    renderRecentCaptures();
+    showScanLoadBlock();
+    if (!keepStatus) {
+        setScanLoadStatus('', 'neutral');
+        setScanCaptureStatus('', 'neutral');
+    }
+    await storageRemove([SCAN_RUN_STORAGE_KEY]);
+}
+
+async function renderScanPlatformPanel() {
+    const isStaff = await refreshScanStaffGating();
+    if (!isStaff) {
+        setScanLoadStatus(t('scan_extension_only_for_staff'), 'error');
+        showScanLoadBlock();
+        return;
+    }
+    // Restore previous run uuid from storage
+    if (!scanRunUuid) {
+        const stored = await storageGet(SCAN_RUN_STORAGE_KEY);
+        const previous = stored?.[SCAN_RUN_STORAGE_KEY];
+        if (previous?.uuid && isUuidLike(previous.uuid)) {
+            if (scanRunUuidInput) scanRunUuidInput.value = previous.uuid;
+            const ok = await loadScanRun(previous.uuid);
+            if (ok) return;
+        }
+    }
+    if (scanRunUuid && scanRunInfo) {
+        renderScanRunInfo();
+        await refreshActiveTabHint();
+        showScanActiveBlock();
+    } else {
+        showScanLoadBlock();
+    }
+}
+
+scanLoadRunBtn?.addEventListener('click', async () => {
+    const value = String(scanRunUuidInput?.value || '').trim();
+    if (!isUuidLike(value)) {
+        setScanLoadStatus(t('scan_run_not_found'), 'error');
+        return;
+    }
+    await loadScanRun(value);
+});
+
+scanRunUuidInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        scanLoadRunBtn?.click();
+    }
+});
+
+scanCaptureBtn?.addEventListener('click', () => {
+    captureCurrentPage();
+});
+
+scanTerminateBtn?.addEventListener('click', () => {
+    terminateScanRun();
+});
+
+scanRestartBtn?.addEventListener('click', async () => {
+    if (!scanRunUuid || isScanBusy) return;
+    if (!confirm('Annulla questa run e creane una nuova vuota per lo stesso fillable?')) return;
+    isScanBusy = true;
+    if (scanRestartBtn) scanRestartBtn.disabled = true;
+    setScanCaptureStatus('Ricomincio da zero...', 'neutral');
+    try {
+        const r = await sendRuntimeMessage({ action: 'platformScanRestart', scanRunUuid });
+        if (!r?.success) throw new Error(r?.error || 'restart failed');
+        const newUuid = r.restart?.scan_run_uuid;
+        if (!newUuid) throw new Error('backend did not return new scan_run_uuid');
+        await clearScanRunState();
+        if (scanRunUuidInput) scanRunUuidInput.value = newUuid;
+        await loadScanRun(newUuid);
+    } catch (err) {
+        setScanCaptureStatus(`Restart fallito: ${err.message || 'errore'}`, 'error');
+    } finally {
+        if (scanRestartBtn) scanRestartBtn.disabled = false;
+        isScanBusy = false;
+    }
+});
+
+scanClearRunBtn?.addEventListener('click', () => {
+    clearScanRunState();
+});
+
 
 function getGrantzyValueByKey(key) {
     const match = flatGrantzyFields.find(item => item.key === key);
@@ -1479,8 +1839,62 @@ applicationsViewButton?.addEventListener('click', () => {
 clearDataScopeButton?.addEventListener('click', () => {
     clearDataScope({ focusSearch: true });
 });
+refreshDataButton?.addEventListener('click', async () => {
+    if (!selectedApplication?.uuid || refreshDataButton.disabled) {
+        return;
+    }
+    refreshDataButton.disabled = true;
+    refreshDataButton.classList.add('spinning');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'refresh-overlay';
+    const spinner = document.createElement('span');
+    spinner.className = 'loader-spinner';
+    overlay.appendChild(spinner);
+    overlay.appendChild(document.createTextNode(t('refreshing_data')));
+    resultsContainer.appendChild(overlay);
+
+    try {
+        const response = await sendRuntimeMessage({
+            action: 'fetchApplicationData',
+            applicationId: selectedApplication.uuid
+        });
+
+        if (!response?.success) {
+            throw new Error(response?.error || t('could_not_load_application_data'));
+        }
+
+        const rawFields = response.data?.fields || [];
+        const flattenedServerFields = Array.isArray(response.data?.flat_fields)
+            ? response.data.flat_fields : null;
+        const fields = flattenedServerFields || flattenFields(rawFields);
+
+        await storageSet({
+            selectedApplicationData: {
+                fields: rawFields,
+                flatFields: flattenedServerFields,
+                updatedAt: response.data?.updated_at || null
+            }
+        });
+
+        updateResultsContainer(resultsContainer, fields, widgetEl, searchInput);
+        resultsSelection(resultsContainer, searchInput);
+        await refreshFlatGrantzyFields();
+        searchInput.value = '';
+        showToast(t('data_refreshed'));
+    } catch (error) {
+        overlay.remove();
+        showToast(error.message || t('could_not_load_application_data'));
+    }
+
+    refreshDataButton.disabled = false;
+    refreshDataButton.classList.remove('spinning');
+});
 quickAccessViewButton?.addEventListener('click', () => {
     setActiveView('quick_access');
+});
+scanPlatformViewButton?.addEventListener('click', () => {
+    setActiveView('scan_platform');
 });
 settingsViewButton?.addEventListener('click', () => {
     setActiveView('settings');
@@ -1647,6 +2061,7 @@ for (const [key, el] of Object.entries(collapsibleEls)) {
     resetAutofillState();
     setAutofillIdleStatus();
     await refreshSettingsPanel();
+    await refreshScanStaffGating();
     await setActiveView('applications');
     await refreshConnectionStatus({ withSpinner: false });
     await renderQuickAccessPanel();

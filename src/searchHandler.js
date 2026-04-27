@@ -555,14 +555,22 @@ function formatFileSize(bytes) {
 
 function renderFileResults(container, result, isFirst) {
     const files = Array.isArray(result.value) ? result.value : [];
+    const hasSignatureInfo = files.some(f => f.is_signed === true || f.is_signed === false);
     files.forEach((file, fileIndex) => {
         const sizeLabel = formatFileSize(file.size);
         const displayValue = sizeLabel ? `${file.name} (${sizeLabel})` : file.name;
+        let metadataKey = 'click_to_download_file';
+        if (hasSignatureInfo) {
+            metadataKey = file.is_signed ? 'click_to_download_signed_file' : 'click_to_download_unsigned_file';
+        }
         const resultItem = createResultItem(result.key, displayValue, {
-            metadata: t('click_to_download_file'),
+            metadata: t(metadataKey),
             displayValue
         });
         resultItem.classList.add('result-item-file');
+        if (hasSignatureInfo) {
+            resultItem.classList.add(file.is_signed ? 'result-item-file-signed' : 'result-item-file-unsigned');
+        }
 
         resultItem.addEventListener('click', async () => {
             resultItem.classList.add('downloading');

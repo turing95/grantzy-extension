@@ -67,6 +67,21 @@ await page.evaluate(() => {
                             { key: 'Nome azienda', value: 'Acme S.r.l.' },
                             { key: 'Partita IVA', value: '12345678901' },
                             { key: 'Email', value: 'info@acme.it' },
+                            {
+                                key: 'Bilancio',
+                                value: [
+                                    { uuid: 'f1', name: 'bilancio_2024.pdf', size: 1048576, content_type: 'application/pdf', is_signed: false },
+                                    { uuid: 'f2', name: 'bilancio_2024_firmato.p7m', size: 1100000, content_type: 'application/pkcs7-mime', is_signed: true },
+                                ],
+                                value_type: 'file'
+                            },
+                            {
+                                key: 'Visura camerale',
+                                value: [
+                                    { uuid: 'f3', name: 'visura.pdf', size: 524288, content_type: 'application/pdf', is_signed: false },
+                                ],
+                                value_type: 'file'
+                            },
                         ]
                     }
                 ],
@@ -74,6 +89,21 @@ await page.evaluate(() => {
                     { key: 'Nome azienda', value: 'Acme S.r.l.', value_type: 'text' },
                     { key: 'Partita IVA', value: '12345678901', value_type: 'text' },
                     { key: 'Email', value: 'info@acme.it', value_type: 'text' },
+                    {
+                        key: 'Bilancio',
+                        value: [
+                            { uuid: 'f1', name: 'bilancio_2024.pdf', size: 1048576, content_type: 'application/pdf', is_signed: false },
+                            { uuid: 'f2', name: 'bilancio_2024_firmato.p7m', size: 1100000, content_type: 'application/pkcs7-mime', is_signed: true },
+                        ],
+                        value_type: 'file'
+                    },
+                    {
+                        key: 'Visura camerale',
+                        value: [
+                            { uuid: 'f3', name: 'visura.pdf', size: 524288, content_type: 'application/pdf', is_signed: false },
+                        ],
+                        value_type: 'file'
+                    },
                 ],
                 updatedAt: new Date().toISOString()
             }
@@ -91,6 +121,47 @@ const screenshotPath = path.join(screenshotDir, 'sidepanel-with-data.png');
 await page.screenshot({ path: screenshotPath, fullPage: true });
 console.log(`Screenshot saved: ${screenshotPath}`);
 
+// Test file field rendering: type "bilancio" in the search box
+const searchInput = page.locator('input[placeholder="Cerca pratiche..."]');
+await searchInput.fill('bilancio');
+await page.waitForTimeout(1000);
+
+const fileScreenshotPath = path.join(screenshotDir, 'sidepanel-file-results.png');
+await page.screenshot({ path: fileScreenshotPath, fullPage: true });
+console.log(`Screenshot saved: ${fileScreenshotPath}`);
+
+// Clear search and search for "visura" to see unsigned-only field
+await searchInput.fill('visura');
+await page.waitForTimeout(1000);
+
+const unsignedScreenshotPath = path.join(screenshotDir, 'sidepanel-unsigned-file.png');
+await page.screenshot({ path: unsignedScreenshotPath, fullPage: true });
+console.log(`Screenshot saved: ${unsignedScreenshotPath}`);
+
+// Test refresh button: visible and clickable when data is loaded
+const searchInputForRefresh = page.locator('#app-search-input');
+await searchInputForRefresh.fill('');
+await page.waitForTimeout(300);
+
+const refreshBtn = page.locator('#refresh-data-btn');
+const isRefreshVisible = await refreshBtn.isVisible();
+console.log(`Refresh button visible with data: ${isRefreshVisible}`);
+
+// Click refresh — will trigger API call that fails (no auth), capture the spinning state
+await refreshBtn.click();
+await page.waitForTimeout(200);
+
+const refreshSpinningPath = path.join(screenshotDir, 'sidepanel-refresh-spinning.png');
+await page.screenshot({ path: refreshSpinningPath, fullPage: true });
+console.log(`Screenshot saved: ${refreshSpinningPath}`);
+
+// Wait for the refresh to complete (will error out due to no API)
+await page.waitForTimeout(3000);
+
+const refreshDonePath = path.join(screenshotDir, 'sidepanel-refresh-done.png');
+await page.screenshot({ path: refreshDonePath, fullPage: true });
+console.log(`Screenshot saved: ${refreshDonePath}`);
+
 // Also test the empty state (no selected application)
 await page.evaluate(() => {
     return new Promise(resolve => {
@@ -103,6 +174,29 @@ await page.waitForTimeout(1500);
 const emptyScreenshotPath = path.join(screenshotDir, 'sidepanel-empty.png');
 await page.screenshot({ path: emptyScreenshotPath, fullPage: true });
 console.log(`Screenshot saved: ${emptyScreenshotPath}`);
+
+// ----- Platform Scan Mode (staff-only) visual smoke -----
+// In real life the section is gated server-side via session.user.is_staff.
+// For the smoke test we just unhide the button and switch view, so the
+// rendered layout (load block, intro copy, inputs) can be screenshotted.
+await page.evaluate(() => {
+    return new Promise(resolve => {
+        chrome.storage.local.remove(['grantzyPlatformScanRunV1'], () => resolve());
+    });
+});
+await page.reload();
+await page.waitForTimeout(1000);
+await page.evaluate(() => {
+    const btn = document.getElementById('show-scan-platform-view-btn');
+    if (btn) {
+        btn.hidden = false;
+        btn.click();
+    }
+});
+await page.waitForTimeout(500);
+const scanPlatformScreenshotPath = path.join(screenshotDir, 'sidepanel-scan-platform.png');
+await page.screenshot({ path: scanPlatformScreenshotPath, fullPage: true });
+console.log(`Screenshot saved: ${scanPlatformScreenshotPath}`);
 
 await context.close();
 

@@ -8,7 +8,9 @@ node_modules
 .idea
 .claude/
 src/env.js
-release/grantzy-extension-v*.zip
+release/
+grantzy-extension-v*.zip
 .DS_Store
 .test-screenshots/
 .test-profile/
+.test-profile-scan/

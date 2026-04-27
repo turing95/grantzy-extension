@@ -940,6 +940,126 @@ async function handleGetActiveTabInfo() {
     };
 }
 
+
+// ------------------------------ Platform scan ------------------------------
+
+function captureVisibleTabPng(windowId) {
+    return new Promise((resolve, reject) => {
+        try {
+            chrome.tabs.captureVisibleTab(
+                windowId ?? null,
+                { format: 'png' },
+                dataUrl => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                        return;
+                    }
+                    if (!dataUrl) {
+                        reject(new Error('captureVisibleTab returned no data'));
+                        return;
+                    }
+                    // Strip the "data:image/png;base64," prefix.
+                    const idx = dataUrl.indexOf(',');
+                    resolve(idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl);
+                }
+            );
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+async function handlePlatformScanRunInfo(message) {
+    const scanRunUuid = String(message.scanRunUuid || '').trim();
+    if (!scanRunUuid) {
+        throw new Error('scanRunUuid is required');
+    }
+    const data = await fetchJson(
+        buildApiUrl(`/api/setup/platform-scan/${scanRunUuid}/info/`)
+    );
+    return { success: true, info: data };
+}
+
+async function handlePlatformScanCapture(message) {
+    const scanRunUuid = String(message.scanRunUuid || '').trim();
+    if (!scanRunUuid) {
+        throw new Error('scanRunUuid is required');
+    }
+    const captureContext = String(message.captureContext || '').trim();
+
+    // 1. Discover form fields via the existing content script. The side panel
+    //    is responsible for requesting permission (chrome.permissions.request
+    //    requires a direct user gesture which is lost when bouncing through
+    //    the background message channel).
+    const tab = await getActiveTab();
+    await ensureTabPermission(tab.url || '', false);
+    await executeScript(tab.id, ['src/formFiller.content.js']);
+    let scanResponse;
+    try {
+        scanResponse = await sendMessageToTab(tab.id, { action: '__grantzy_scan_form' });
+    } catch (connectionError) {
+        const msg = String(connectionError?.message || '');
+        if (msg.includes('Could not establish connection') || msg.includes('Receiving end does not exist')) {
+            throw new Error('Could not reach the page. Please refresh it and try again.');
+        }
+        throw connectionError;
+    }
+    if (!scanResponse || scanResponse.success === false) {
+        throw new Error(scanResponse?.error || 'Form discovery failed');
+    }
+    const domFields = Array.isArray(scanResponse.fields) ? scanResponse.fields : [];
+
+    // 2. Capture viewport screenshot.
+    const screenshotB64 = await captureVisibleTabPng(tab.windowId);
+
+    // 3. POST to backend.
+    const data = await fetchJson(
+        buildApiUrl(`/api/setup/platform-scan/${scanRunUuid}/capture/`),
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_url: tab.url || scanResponse.url || '',
+                page_title: tab.title || '',
+                screenshot_b64: screenshotB64,
+                dom_fields: domFields,
+                capture_context: captureContext,
+            }),
+        }
+    );
+
+    return { success: true, capture: data };
+}
+
+async function handlePlatformScanRestart(message) {
+    const scanRunUuid = String(message.scanRunUuid || '').trim();
+    if (!scanRunUuid) {
+        throw new Error('scanRunUuid is required');
+    }
+    const data = await fetchJson(
+        buildApiUrl(`/api/setup/platform-scan/${scanRunUuid}/restart/`),
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+    );
+    return { success: true, restart: data };
+}
+
+async function handlePlatformScanCommit(message) {
+    const scanRunUuid = String(message.scanRunUuid || '').trim();
+    if (!scanRunUuid) {
+        throw new Error('scanRunUuid is required');
+    }
+    const status = String(message.status || 'completed').trim();
+    const data = await fetchJson(
+        buildApiUrl(`/api/setup/platform-scan/${scanRunUuid}/commit/`),
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+        }
+    );
+    return { success: true, commit: data };
+}
+
 const ACTION_HANDLERS = {
     fetchApplications: handleFetchApplications,
     fetchApplicationData: handleFetchApplicationData,
@@ -973,6 +1093,10 @@ const ACTION_HANDLERS = {
         planItems: Array.isArray(message.planItems) ? message.planItems : []
     }),
     undoLastFillInActiveTab: async () => runTabAutofillAction({ action: '__grantzy_undo_fill' }),
+    platformScanRunInfo: handlePlatformScanRunInfo,
+    platformScanCapture: handlePlatformScanCapture,
+    platformScanCommit: handlePlatformScanCommit,
+    platformScanRestart: handlePlatformScanRestart,
     getActiveTabInfo: handleGetActiveTabInfo,
     downloadFile: async (message) => {
         if (!message.fileUuid) {
