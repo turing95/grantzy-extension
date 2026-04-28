@@ -969,6 +969,106 @@ function captureVisibleTabPng(windowId) {
     });
 }
 
+function debuggerSend(target, method, params = {}) {
+    return new Promise((resolve, reject) => {
+        chrome.debugger.sendCommand(target, method, params, result => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+            }
+            resolve(result);
+        });
+    });
+}
+
+function debuggerAttach(target, version = '1.3') {
+    return new Promise((resolve, reject) => {
+        chrome.debugger.attach(target, version, () => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+            }
+            resolve();
+        });
+    });
+}
+
+function debuggerDetach(target) {
+    return new Promise(resolve => {
+        try {
+            chrome.debugger.detach(target, () => {
+                // Ignore lastError — we just want best-effort detach.
+                void chrome.runtime.lastError;
+                resolve();
+            });
+        } catch (_e) {
+            resolve();
+        }
+    });
+}
+
+// Hard cap on full-page screenshot height to keep the OpenAI/Anthropic image
+// payload reasonable. Beyond this we crop. Both providers happily accept ~10MB
+// PNGs but token cost on tall images grows linearly.
+const FULL_PAGE_MAX_HEIGHT = 8000;
+const FULL_PAGE_MAX_WIDTH = 1800;
+
+async function captureFullPagePng(tabId) {
+    const target = { tabId };
+    await debuggerAttach(target, '1.3');
+    try {
+        const metrics = await debuggerSend(target, 'Page.getLayoutMetrics');
+        const content = metrics?.cssContentSize || metrics?.contentSize || {};
+        const widthRaw = Math.ceil(Number(content.width) || 0);
+        const heightRaw = Math.ceil(Number(content.height) || 0);
+        if (widthRaw <= 0 || heightRaw <= 0) {
+            throw new Error('Invalid layout metrics');
+        }
+        const width = Math.min(widthRaw, FULL_PAGE_MAX_WIDTH);
+        const height = Math.min(heightRaw, FULL_PAGE_MAX_HEIGHT);
+        const result = await debuggerSend(target, 'Page.captureScreenshot', {
+            format: 'png',
+            captureBeyondViewport: true,
+            clip: { x: 0, y: 0, width, height, scale: 1 },
+        });
+        const data = result?.data;
+        if (!data) throw new Error('Page.captureScreenshot returned no data');
+        return data;
+    } finally {
+        await debuggerDetach(target);
+    }
+}
+
+async function captureTabScreenshotPng(tab) {
+    // Prefer full-page via the debugger protocol so long forms are captured
+    // in one shot. Fall back to the viewport-only capture if the user denies
+    // the debugger banner or the protocol fails (e.g. another debugger already
+    // attached).
+    try {
+        return await captureFullPagePng(tab.id);
+    } catch (err) {
+        try {
+            // best-effort: ensure we don't leak a debugger session
+            await debuggerDetach({ tabId: tab.id });
+        } catch (_e) {}
+        const msg = String(err?.message || '');
+        // Some failure modes are user-actionable; surface them clearly upstream.
+        // Most others fall through to viewport capture.
+        const fallbackReasons = [
+            'Another debugger is already attached',
+            'Cannot access',
+            'Cannot attach',
+            'Debugger is already attached',
+            'No tab with given id',
+        ];
+        if (fallbackReasons.some(r => msg.includes(r))) {
+            // Use the visible-tab fallback so the operator still gets something
+            // even if the debugger banner is rejected.
+        }
+        return await captureVisibleTabPng(tab.windowId);
+    }
+}
+
 async function handlePlatformScanRunInfo(message) {
     const scanRunUuid = String(message.scanRunUuid || '').trim();
     if (!scanRunUuid) {
@@ -1010,8 +1110,8 @@ async function handlePlatformScanCapture(message) {
     const domFields = Array.isArray(scanResponse.fields) ? scanResponse.fields : [];
     const ariaSnapshot = typeof scanResponse.ariaSnapshot === 'string' ? scanResponse.ariaSnapshot : '';
 
-    // 2. Capture viewport screenshot.
-    const screenshotB64 = await captureVisibleTabPng(tab.windowId);
+    // 2. Capture full-page screenshot (with viewport fallback).
+    const screenshotB64 = await captureTabScreenshotPng(tab);
 
     // 3. POST to backend.
     const data = await fetchJson(

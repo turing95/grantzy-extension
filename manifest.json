@@ -11,6 +11,7 @@
     "sidePanel",
     "scripting",
     "tabs",
+    "debugger",
     "downloads"
   ],
   "host_permissions": [
