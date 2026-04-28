@@ -100,13 +100,49 @@
                     <p id="scan-intro" class="widget-subtitle">Mappa la struttura dei campi di un portale grant.</p>
 
                     <div id="scan-load-block" class="mt-10">
-                        <label for="scan-run-uuid-input" class="sr-only">ID scan run</label>
-                        <input type="text" id="scan-run-uuid-input" placeholder="Incolla qui l'UUID della scan run"
-                               class="settings-input"
-                               autocomplete="off" spellcheck="false"/>
-                        <div class="inline-actions mt-8">
-                            <button id="scan-load-run-btn" type="button">Carica run</button>
+                        <!-- A.6 — Run picker: search + recent runs + "+ crea nuova" button + paste UUID fallback -->
+                        <div class="scan-picker-wrap">
+                            <div class="scan-picker-toolbar">
+                                <input type="search" id="scan-picker-search"
+                                       class="settings-input scan-picker-search-input"
+                                       placeholder="🔍 Cerca run..."
+                                       autocomplete="off" spellcheck="false"/>
+                                <button id="scan-picker-refresh-btn" type="button"
+                                        class="scan-picker-refresh"
+                                        title="Aggiorna lista" aria-label="Aggiorna">↻</button>
+                            </div>
+                            <div class="scan-picker-actions mt-8">
+                                <button id="scan-picker-create-btn" type="button"
+                                        class="scan-picker-create-btn">
+                                    ➕ Crea nuova run
+                                </button>
+                            </div>
+                            <!-- Fillable picker (hidden until "Crea nuova run" clicked) -->
+                            <div id="scan-picker-fillable-wrap" class="scan-picker-fillable-wrap mt-8" hidden>
+                                <div class="scan-picker-fillable-header">
+                                    <strong>Scegli per quale portale:</strong>
+                                    <button id="scan-picker-fillable-cancel" type="button"
+                                            class="scan-picker-cancel" aria-label="Annulla">✕</button>
+                                </div>
+                                <div id="scan-picker-fillable-list" class="scan-picker-list mt-4">
+                                    <div class="text-muted">Caricamento fillable...</div>
+                                </div>
+                            </div>
+                            <div class="scan-picker-section-label mt-10">Run recenti</div>
+                            <div id="scan-picker-recent-list" class="scan-picker-list mt-4">
+                                <div class="text-muted">Caricamento...</div>
+                            </div>
                         </div>
+                        <details class="scan-picker-paste mt-10">
+                            <summary>Incolla UUID manualmente</summary>
+                            <input type="text" id="scan-run-uuid-input"
+                                   placeholder="UUID della scan run"
+                                   class="settings-input mt-4"
+                                   autocomplete="off" spellcheck="false"/>
+                            <div class="inline-actions mt-8">
+                                <button id="scan-load-run-btn" type="button">Carica run</button>
+                            </div>
+                        </details>
                         <div id="scan-load-status" class="settings-status mt-8" role="status" aria-live="polite"></div>
                     </div>
 
@@ -121,15 +157,28 @@
 
                         <div class="mt-10">
                             <label for="scan-capture-context" class="text-muted">Descrivi questa cattura (opzionale, ma migliora la qualità)</label>
-                            <textarea id="scan-capture-context"
-                                      class="settings-input mt-4"
-                                      rows="2"
-                                      placeholder="es. Modale Aggiungi socio fisico (dentro Compagine sociale)"
-                                      autocomplete="off"
-                                      spellcheck="false"></textarea>
+                            <div class="scan-context-input-wrap mt-4">
+                                <textarea id="scan-capture-context"
+                                          class="settings-input scan-context-textarea"
+                                          rows="2"
+                                          placeholder="es. Modale Aggiungi socio fisico (dentro Compagine sociale)"
+                                          autocomplete="off"
+                                          spellcheck="false"></textarea>
+                                <button id="scan-context-mic-btn" type="button" class="scan-mic-btn"
+                                        title="Detta il contesto a voce (it-IT)" aria-label="Detta a voce">
+                                    <span class="scan-mic-icon" aria-hidden="true">🎙️</span>
+                                </button>
+                            </div>
+                            <div id="scan-context-mic-status" class="text-muted mt-4" hidden></div>
                         </div>
                         <div class="autofill-actions mt-10">
                             <button id="scan-capture-btn" type="button" class="magic-fill-btn">📸 Cattura questa pagina</button>
+                        </div>
+                        <div class="mt-4">
+                            <label class="scan-checkbox-label">
+                                <input id="scan-open-dropdowns-toggle" type="checkbox" checked />
+                                <span>Apri dropdown chiusi prima della cattura (mat-select, combobox)</span>
+                            </label>
                         </div>
                         <div id="scan-capture-status" role="status" aria-live="polite" class="mt-8"></div>
 
@@ -138,8 +187,32 @@
                             <div id="scan-recent-captures-list" class="quick-list mt-8"></div>
                         </div>
 
+                        <!-- A.3 Catture salvate (con delete) + A.4 Live tree view -->
+                        <div id="scan-state-wrap" class="mt-10" hidden>
+                            <div class="scan-state-tabs">
+                                <button id="scan-state-tab-captures" type="button"
+                                        class="scan-state-tab is-active" data-tab="captures">
+                                    📋 Catture (<span id="scan-state-captures-count">0</span>)
+                                </button>
+                                <button id="scan-state-tab-tree" type="button"
+                                        class="scan-state-tab" data-tab="tree">
+                                    🌳 Tree (<span id="scan-state-tree-count">0</span>)
+                                </button>
+                                <button id="scan-state-refresh-btn" type="button"
+                                        class="scan-state-refresh"
+                                        title="Aggiorna" aria-label="Aggiorna">↻</button>
+                            </div>
+                            <div id="scan-state-captures-panel" class="scan-state-panel">
+                                <div id="scan-state-captures-list" class="scan-captures-list"></div>
+                            </div>
+                            <div id="scan-state-tree-panel" class="scan-state-panel" hidden>
+                                <div id="scan-state-tree-view" class="scan-tree-view"></div>
+                            </div>
+                        </div>
+
                         <div class="inline-actions mt-10">
                             <button id="scan-terminate-btn" type="button">✅ Termina scan e salva</button>
+                            <button id="scan-reprocess-btn" type="button" title="Ri-processa tutte le catture salvate con il prompt corrente (no nuove catture)">🔁 Ri-processa</button>
                             <button id="scan-restart-btn" type="button">🔄 Ricomincia da zero</button>
                             <button id="scan-clear-run-btn" type="button">Cambia run</button>
                         </div>

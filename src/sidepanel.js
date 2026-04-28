@@ -750,6 +750,8 @@ async function loadScanRun(uuid) {
         showScanActiveBlock();
         setScanLoadStatus(t('scan_run_loaded'), 'success');
         setScanCaptureStatus('', 'neutral');
+        // Pull the captures + tree state for the live view (A.3 + A.4).
+        refreshScanFullState();
         return true;
     } catch (err) {
         setScanLoadStatus(t('scan_run_not_found'), 'error');
@@ -757,6 +759,11 @@ async function loadScanRun(uuid) {
     } finally {
         if (scanLoadRunBtn) scanLoadRunBtn.disabled = false;
     }
+}
+
+function getScanOpenDropdownsPref() {
+    const el = document.getElementById('scan-open-dropdowns-toggle');
+    return el ? !!el.checked : true;  // default ON if element missing
 }
 
 async function captureCurrentPage() {
@@ -776,6 +783,7 @@ async function captureCurrentPage() {
             action: 'platformScanCapture',
             scanRunUuid,
             captureContext,
+            openDropdowns: getScanOpenDropdownsPref(),
         });
         if (!response?.success) {
             throw new Error(response?.error || 'unknown error');
@@ -803,6 +811,9 @@ async function captureCurrentPage() {
             scanCaptureContextEl.value = '';
         }
         await refreshActiveTabHint();
+        // Refresh the captures + tree view (A.3 + A.4) so operator sees the
+        // newly-added nodes without manual refresh.
+        refreshScanFullState();
     } catch (err) {
         setScanCaptureStatus(
             t('scan_capture_failed', { error: err.message || 'errore' }),
@@ -897,9 +908,297 @@ scanRunUuidInput?.addEventListener('keydown', (event) => {
     }
 });
 
+// --- A.6 — Run picker: search + recent runs always visible + "Crea nuova" -----
+// Earlier this was tab-based ("Recenti" vs "+ Nuova"). Operator feedback:
+// "I clicked + Nuova run and nothing happened" — they expected an ACTION,
+// not a tab swap. New layout: recent runs always visible, prominent
+// "➕ Crea nuova run" button that opens a fillable picker inline; click on
+// a fillable creates the run and loads it directly.
+const scanPickerSearch = document.getElementById('scan-picker-search');
+const scanPickerRefreshBtn = document.getElementById('scan-picker-refresh-btn');
+const scanPickerRecentList = document.getElementById('scan-picker-recent-list');
+const scanPickerCreateBtn = document.getElementById('scan-picker-create-btn');
+const scanPickerFillableWrap = document.getElementById('scan-picker-fillable-wrap');
+const scanPickerFillableList = document.getElementById('scan-picker-fillable-list');
+const scanPickerFillableCancel = document.getElementById('scan-picker-fillable-cancel');
+
+let scanPickerSearchDebounce = null;
+
+function fmtRelativeTime(iso) {
+    if (!iso) return '';
+    try { return formatRelativeTime(iso); } catch (_) { return iso.slice(0, 16); }
+}
+
+function renderScanPickerRecent(runs) {
+    if (!scanPickerRecentList) return;
+    if (!runs.length) {
+        scanPickerRecentList.innerHTML = '<div class="text-muted">Nessuna run trovata. Clicca "Crea nuova run" sopra.</div>';
+        return;
+    }
+    scanPickerRecentList.innerHTML = runs.map(r => {
+        const fillable = escapeHtml(r.fillable?.name || r.fillable?.key || '(senza nome)');
+        const bando = escapeHtml(r.bando?.name || '');
+        const phase = escapeHtml(r.bando?.phase_name || '');
+        const portal = escapeHtml(r.portal_url || '');
+        const when = escapeHtml(fmtRelativeTime(r.started_at));
+        const status = escapeHtml(r.status || 'unknown');
+        const counters = `${r.captures_count} catture · ${r.fields_count} nodi`;
+        return (
+            `<div class="scan-picker-item" data-run-uuid="${escapeHtml(r.scan_run_uuid)}">
+                <div class="scan-picker-item-header">
+                    <span class="scan-picker-item-status status-${status}">${status}</span>
+                    <span class="scan-picker-item-when">${when}</span>
+                </div>
+                <div class="scan-picker-item-title">${fillable}</div>
+                <div class="scan-picker-item-meta">${bando}${phase ? ' · ' + phase : ''}</div>
+                <div class="scan-picker-item-meta">${counters}${portal ? ' · ' + portal : ''}</div>
+            </div>`
+        );
+    }).join('');
+    scanPickerRecentList.querySelectorAll('.scan-picker-item').forEach(el => {
+        el.addEventListener('click', () => {
+            const uuid = el.dataset.runUuid;
+            if (uuid) loadScanRun(uuid);
+        });
+    });
+}
+
+function renderScanPickerFillables(fillables) {
+    if (!scanPickerFillableList) return;
+    if (!fillables.length) {
+        scanPickerFillableList.innerHTML = '<div class="text-muted">Nessun portale-form fillable disponibile.</div>';
+        return;
+    }
+    scanPickerFillableList.innerHTML = fillables.map(f => {
+        const name = escapeHtml(f.fillable_name || f.fillable_key || '(senza nome)');
+        const bando = escapeHtml(f.bando?.name || '');
+        const phase = escapeHtml(f.bando?.phase_name || '');
+        const portal = escapeHtml(f.portal_url || '');
+        const lastWhen = f.last_run_at ? `Ultima run ${escapeHtml(fmtRelativeTime(f.last_run_at))}` : 'Nessuna run ancora';
+        return (
+            `<div class="scan-picker-item" data-fillable-uuid="${escapeHtml(f.fillable_uuid)}">
+                <div class="scan-picker-item-header">
+                    <span class="scan-picker-item-when">${lastWhen}</span>
+                </div>
+                <div class="scan-picker-item-title">▶ ${name}</div>
+                <div class="scan-picker-item-meta">${bando}${phase ? ' · ' + phase : ''}</div>
+                ${portal ? `<div class="scan-picker-item-meta">${portal}</div>` : ''}
+            </div>`
+        );
+    }).join('');
+    scanPickerFillableList.querySelectorAll('.scan-picker-item').forEach(el => {
+        el.addEventListener('click', async () => {
+            const fillableUuid = el.dataset.fillableUuid;
+            if (!fillableUuid) return;
+            const fillableName = el.querySelector('.scan-picker-item-title')?.textContent?.replace(/^▶\s*/, '') || 'fillable';
+            if (!confirm(`Creare una nuova scan run per:\n\n${fillableName}\n\nLa run sarà subito attiva e potrai iniziare a catturare.`)) return;
+            try {
+                if (scanPickerCreateBtn) {
+                    scanPickerCreateBtn.disabled = true;
+                    scanPickerCreateBtn.textContent = '⏳ Creo...';
+                }
+                const r = await sendRuntimeMessage({ action: 'platformScanCreate', fillableUuid });
+                if (!r?.success) throw new Error(r?.error || 'create failed');
+                const newUuid = r.run?.scan_run_uuid;
+                if (!newUuid) throw new Error('backend did not return scan_run_uuid');
+                hideFillablePicker();
+                await loadScanRun(newUuid);
+                refreshRecentList();
+            } catch (err) {
+                setScanLoadStatus(`Errore creazione run: ${err.message || err}`, 'error');
+            } finally {
+                if (scanPickerCreateBtn) {
+                    scanPickerCreateBtn.disabled = false;
+                    scanPickerCreateBtn.textContent = '➕ Crea nuova run';
+                }
+            }
+        });
+    });
+}
+
+function hideFillablePicker() {
+    if (scanPickerFillableWrap) scanPickerFillableWrap.hidden = true;
+}
+
+async function showFillablePicker() {
+    if (!scanPickerFillableWrap) return;
+    scanPickerFillableWrap.hidden = false;
+    if (scanPickerFillableList) {
+        scanPickerFillableList.innerHTML = '<div class="text-muted">Caricamento fillable...</div>';
+    }
+    try {
+        const search = String(scanPickerSearch?.value || '').trim();
+        const r = await sendRuntimeMessage({
+            action: 'platformScanFillables',
+            search,
+            limit: 50,
+        });
+        if (!r?.success) throw new Error(r?.error || 'fillables failed');
+        renderScanPickerFillables(r.fillables?.fillables || []);
+    } catch (err) {
+        if (scanPickerFillableList) {
+            scanPickerFillableList.innerHTML = `<div class="text-muted">Errore: ${escapeHtml(err.message || err)}</div>`;
+        }
+    }
+}
+
+async function refreshRecentList() {
+    if (!scanPickerRecentList) return;
+    const search = String(scanPickerSearch?.value || '').trim();
+    scanPickerRecentList.innerHTML = '<div class="text-muted">Caricamento...</div>';
+    try {
+        const r = await sendRuntimeMessage({
+            action: 'platformScanList',
+            search,
+            limit: 30,
+        });
+        if (!r?.success) throw new Error(r?.error || 'list failed');
+        renderScanPickerRecent(r.list?.runs || []);
+    } catch (err) {
+        scanPickerRecentList.innerHTML = `<div class="text-muted">Errore: ${escapeHtml(err.message || err)}</div>`;
+    }
+}
+
+scanPickerSearch?.addEventListener('input', () => {
+    if (scanPickerSearchDebounce) clearTimeout(scanPickerSearchDebounce);
+    scanPickerSearchDebounce = setTimeout(() => {
+        refreshRecentList();
+        if (scanPickerFillableWrap && !scanPickerFillableWrap.hidden) showFillablePicker();
+    }, 250);
+});
+
+scanPickerCreateBtn?.addEventListener('click', () => {
+    if (scanPickerFillableWrap && !scanPickerFillableWrap.hidden) {
+        hideFillablePicker();
+    } else {
+        showFillablePicker();
+    }
+});
+
+scanPickerFillableCancel?.addEventListener('click', hideFillablePicker);
+
+scanPickerRefreshBtn?.addEventListener('click', () => {
+    refreshRecentList();
+    if (scanPickerFillableWrap && !scanPickerFillableWrap.hidden) showFillablePicker();
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (scanPickerRecentList) refreshRecentList();
+});
+document.querySelectorAll('[data-view="scan-platform-view"]').forEach(btn => {
+    btn.addEventListener('click', () => setTimeout(refreshRecentList, 150));
+});
+
 scanCaptureBtn?.addEventListener('click', () => {
     captureCurrentPage();
 });
+
+// --- A.1 Audio dictation for capture context (Web Speech API, it-IT) -------
+// Browser-native SpeechRecognition runs entirely client-side, no upload, no
+// server cost. Press the mic to start dictating; press again to stop. Interim
+// results render live; the final transcript is appended (not replaced) to
+// whatever the operator already typed in the textarea.
+const scanContextMicBtn = document.getElementById('scan-context-mic-btn');
+const scanContextMicStatus = document.getElementById('scan-context-mic-status');
+let scanContextRecognition = null;
+let scanContextDictationActive = false;
+let scanContextDictationBaseline = '';
+
+function setScanContextMicStatus(text, hidden = false) {
+    if (!scanContextMicStatus) return;
+    scanContextMicStatus.textContent = text || '';
+    scanContextMicStatus.hidden = !!hidden || !text;
+}
+
+function getSpeechRecognitionCtor() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function stopScanContextDictation() {
+    if (scanContextRecognition && scanContextDictationActive) {
+        try { scanContextRecognition.stop(); } catch (_) {}
+    }
+}
+
+function startScanContextDictation() {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
+        setScanContextMicStatus('Dictation non supportato da questo browser', false);
+        return;
+    }
+    if (scanContextDictationActive) {
+        stopScanContextDictation();
+        return;
+    }
+    scanContextRecognition = new Ctor();
+    scanContextRecognition.lang = 'it-IT';
+    scanContextRecognition.continuous = true;
+    scanContextRecognition.interimResults = true;
+    scanContextRecognition.maxAlternatives = 1;
+
+    scanContextDictationBaseline = (scanCaptureContextEl?.value || '').trim();
+    let lastInterim = '';
+
+    scanContextRecognition.onstart = () => {
+        scanContextDictationActive = true;
+        scanContextMicBtn?.classList.add('recording');
+        setScanContextMicStatus('🔴 Sto ascoltando… parla pure (ri-clicca per fermare)', false);
+    };
+    scanContextRecognition.onresult = (event) => {
+        let finalText = '';
+        let interimText = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const res = event.results[i];
+            if (res.isFinal) finalText += res[0].transcript;
+            else interimText += res[0].transcript;
+        }
+        if (finalText) {
+            const prefix = scanContextDictationBaseline ? scanContextDictationBaseline + ' ' : '';
+            scanContextDictationBaseline = (prefix + finalText.trim()).trim();
+        }
+        lastInterim = interimText.trim();
+        if (scanCaptureContextEl) {
+            const live = scanContextDictationBaseline + (lastInterim ? ' ' + lastInterim : '');
+            scanCaptureContextEl.value = live;
+        }
+    };
+    scanContextRecognition.onerror = (event) => {
+        const err = event?.error || 'unknown';
+        if (err === 'no-speech') {
+            setScanContextMicStatus('Nessun audio rilevato — riprova', false);
+        } else if (err === 'not-allowed' || err === 'service-not-allowed') {
+            setScanContextMicStatus('Permesso microfono negato. Abilita Mic per questa pagina nelle impostazioni di Chrome.', false);
+        } else {
+            setScanContextMicStatus(`Errore dictation: ${err}`, false);
+        }
+    };
+    scanContextRecognition.onend = () => {
+        scanContextDictationActive = false;
+        scanContextMicBtn?.classList.remove('recording');
+        if (scanCaptureContextEl) {
+            scanCaptureContextEl.value = scanContextDictationBaseline;
+        }
+        setScanContextMicStatus('', true);
+        scanContextRecognition = null;
+    };
+
+    try {
+        scanContextRecognition.start();
+    } catch (err) {
+        setScanContextMicStatus(`Impossibile avviare dictation: ${err.message || err}`, false);
+        scanContextRecognition = null;
+    }
+}
+
+scanContextMicBtn?.addEventListener('click', () => {
+    if (scanContextDictationActive) stopScanContextDictation();
+    else startScanContextDictation();
+});
+
+if (scanContextMicBtn && !getSpeechRecognitionCtor()) {
+    scanContextMicBtn.disabled = true;
+    scanContextMicBtn.title = 'Dictation non supportato da questo browser';
+}
 
 scanTerminateBtn?.addEventListener('click', () => {
     terminateScanRun();
@@ -929,6 +1228,190 @@ scanRestartBtn?.addEventListener('click', async () => {
 
 scanClearRunBtn?.addEventListener('click', () => {
     clearScanRunState();
+});
+
+// --- A.3 + A.4 + A.5 — Captures list (delete) + live tree view + reprocess --
+// Single panel under the capture button, two tabs: "Catture" lists each
+// stored capture with operator_context + delete button; "Tree" renders the
+// cumulative field_tree hierarchically. Refresh button repolls the backend
+// /state/ endpoint. Reprocess button replays all captures through the
+// current CAPTURE_SYSTEM_PROMPT (dry_run preview → confirm → persist).
+const scanStateWrap = document.getElementById('scan-state-wrap');
+const scanStateTabCaptures = document.getElementById('scan-state-tab-captures');
+const scanStateTabTree = document.getElementById('scan-state-tab-tree');
+const scanStateRefreshBtn = document.getElementById('scan-state-refresh-btn');
+const scanStateCapturesPanel = document.getElementById('scan-state-captures-panel');
+const scanStateCapturesList = document.getElementById('scan-state-captures-list');
+const scanStateCapturesCount = document.getElementById('scan-state-captures-count');
+const scanStateTreePanel = document.getElementById('scan-state-tree-panel');
+const scanStateTreeView = document.getElementById('scan-state-tree-view');
+const scanStateTreeCount = document.getElementById('scan-state-tree-count');
+const scanReprocessBtn = document.getElementById('scan-reprocess-btn');
+
+let scanFullStateCache = null;
+
+function escapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function renderCapturesList(state) {
+    if (!scanStateCapturesList) return;
+    const captures = state?.captures || [];
+    if (scanStateCapturesCount) scanStateCapturesCount.textContent = captures.length;
+    if (!captures.length) {
+        scanStateCapturesList.innerHTML = '<div class="text-muted">Nessuna cattura ancora.</div>';
+        return;
+    }
+    scanStateCapturesList.innerHTML = captures.map(c => {
+        const ctx = escapeHtml(c.operator_context || '(nessun contesto)');
+        const url = escapeHtml(c.url || '');
+        const title = escapeHtml(c.title || '');
+        const warn = !c.has_replay_payload
+            ? '<div class="scan-capture-warn">⚠ Cattura legacy: replay non disponibile</div>'
+            : '';
+        return (
+            `<div class="scan-capture-item" data-index="${c.index}">
+                <div class="scan-capture-item-body">
+                    <div class="scan-capture-item-header">
+                        <span class="scan-capture-idx">#${c.index}</span>
+                        <span class="scan-capture-added">+${c.added || 0} nodi</span>
+                        <span class="text-muted">·</span>
+                        <span class="text-muted">${c.dom_fields_count || 0} dom</span>
+                    </div>
+                    <div class="scan-capture-context">${ctx}</div>
+                    <div class="scan-capture-meta">${title ? title + ' · ' : ''}${url}</div>
+                    ${warn}
+                </div>
+                <button type="button" class="scan-capture-delete" data-index="${c.index}"
+                        title="Elimina questa cattura e ri-deriva il tree dalle rimanenti">
+                    Elimina
+                </button>
+            </div>`
+        );
+    }).join('');
+    // Wire delete buttons
+    scanStateCapturesList.querySelectorAll('.scan-capture-delete').forEach(btn => {
+        btn.addEventListener('click', () => deleteCaptureAtIndex(Number(btn.dataset.index)));
+    });
+}
+
+function renderTreeView(state) {
+    if (!scanStateTreeView) return;
+    const nodes = state?.field_tree || [];
+    if (scanStateTreeCount) scanStateTreeCount.textContent = nodes.length;
+    if (!nodes.length) {
+        scanStateTreeView.innerHTML = '<div class="text-muted">Tree vuoto.</div>';
+        return;
+    }
+    // Build parent → children index, then render hierarchically.
+    const byUuid = new Map();
+    const childrenByParent = new Map();
+    const roots = [];
+    nodes.forEach(n => byUuid.set(n.row_uuid, n));
+    nodes.forEach(n => {
+        const parent = n.parent_row_uuid || '';
+        if (parent && byUuid.has(parent)) {
+            if (!childrenByParent.has(parent)) childrenByParent.set(parent, []);
+            childrenByParent.get(parent).push(n);
+        } else {
+            roots.push(n);
+        }
+    });
+    function renderNode(n, depth) {
+        const indent = '&nbsp;&nbsp;'.repeat(depth);
+        const typeClass = `scan-tree-node-${n.type || 'text'}`;
+        const reqClass = n.required ? ' scan-tree-node-required' : '';
+        const multiTag = n.multiple ? ' [×N]' : '';
+        const opts = (n.options || []).slice(0, 6);
+        const optsStr = opts.length
+            ? ` <span class="scan-tree-node-options">[${opts.map(escapeHtml).join(', ')}${opts.length < (n.options || []).length ? '…' : ''}]</span>`
+            : '';
+        const cond = n.ask_based_on_label
+            ? ` <span class="scan-tree-node-condition">if ${escapeHtml(n.ask_based_on_label)}=${escapeHtml(n.ask_if_value_is || 'true')}</span>`
+            : '';
+        const label = `${indent}<span class="${typeClass}${reqClass}">${escapeHtml(n.label)}</span>${multiTag} <span class="text-muted">(${escapeHtml(n.type || '?')})</span>${optsStr}${cond}`;
+        const children = childrenByParent.get(n.row_uuid) || [];
+        let html = `<div class="scan-tree-node">${label}</div>`;
+        children.forEach(c => { html += renderNode(c, depth + 1); });
+        return html;
+    }
+    scanStateTreeView.innerHTML = roots.map(r => renderNode(r, 0)).join('');
+}
+
+async function refreshScanFullState() {
+    if (!scanRunUuid) return;
+    try {
+        const r = await sendRuntimeMessage({ action: 'platformScanFullState', scanRunUuid });
+        if (!r?.success) throw new Error(r?.error || 'state fetch failed');
+        scanFullStateCache = r.state;
+        if (scanStateWrap) scanStateWrap.hidden = false;
+        renderCapturesList(r.state);
+        renderTreeView(r.state);
+    } catch (err) {
+        console.warn('[grantzy] full state fetch failed', err);
+    }
+}
+
+async function deleteCaptureAtIndex(idx) {
+    if (!scanRunUuid || !Number.isInteger(idx) || idx < 1) return;
+    if (!confirm(`Eliminare la cattura #${idx}?\n\nIl tree verrà ri-derivato deterministicamente dalle catture rimanenti, senza ri-chiamare l'AI.`)) return;
+    try {
+        const r = await sendRuntimeMessage({ action: 'platformScanDeleteCapture', scanRunUuid, captureIndex: idx });
+        if (!r?.success) throw new Error(r?.error || 'delete failed');
+        const data = r.delete || {};
+        setScanCaptureStatus(
+            `Eliminata cattura #${idx}: tree ${data.previous_node_count} → ${data.new_node_count} nodi`,
+            'success',
+        );
+        await refreshScanFullState();
+    } catch (err) {
+        setScanCaptureStatus(`Errore eliminazione: ${err.message || err}`, 'error');
+    }
+}
+
+scanStateRefreshBtn?.addEventListener('click', () => {
+    refreshScanFullState();
+});
+
+scanStateTabCaptures?.addEventListener('click', () => {
+    scanStateTabCaptures.classList.add('is-active');
+    scanStateTabTree?.classList.remove('is-active');
+    if (scanStateCapturesPanel) scanStateCapturesPanel.hidden = false;
+    if (scanStateTreePanel) scanStateTreePanel.hidden = true;
+});
+scanStateTabTree?.addEventListener('click', () => {
+    scanStateTabTree.classList.add('is-active');
+    scanStateTabCaptures?.classList.remove('is-active');
+    if (scanStateTreePanel) scanStateTreePanel.hidden = false;
+    if (scanStateCapturesPanel) scanStateCapturesPanel.hidden = true;
+});
+
+scanReprocessBtn?.addEventListener('click', async () => {
+    if (!scanRunUuid) return;
+    if (!confirm('Ri-processare tutte le catture salvate con il prompt CAPTURE corrente?\n\nVerrà fatto un dry-run prima per mostrarti il diff. Useful per iterare sul prompt senza ri-collettare evidenza.')) return;
+    setScanCaptureStatus('Ri-processo in dry-run...', 'neutral');
+    try {
+        const dry = await sendRuntimeMessage({ action: 'platformScanReprocess', scanRunUuid, dryRun: true });
+        if (!dry?.success) throw new Error(dry?.error || 'reprocess dry-run failed');
+        const d = dry.reprocess || {};
+        const summary = `Catture processate: ${d.captures_processed}/${d.captures_processed + (d.errors || []).length}\n` +
+                        `Tree: ${d.previous_node_count} → ${d.new_node_count} nodi\n` +
+                        (d.errors?.length ? `Errori: ${d.errors.length}\n` : '') +
+                        `\nApplicare il nuovo tree alla run e (se completata) al field_mapping?`;
+        if (!confirm(summary)) {
+            setScanCaptureStatus('Ri-processo annullato', 'neutral');
+            return;
+        }
+        setScanCaptureStatus('Applico nuovo tree...', 'neutral');
+        const apply = await sendRuntimeMessage({ action: 'platformScanReprocess', scanRunUuid, dryRun: false });
+        if (!apply?.success) throw new Error(apply?.error || 'reprocess persist failed');
+        setScanCaptureStatus(`Ri-processo applicato: ${apply.reprocess?.new_node_count} nodi`, 'success');
+        await refreshScanFullState();
+    } catch (err) {
+        setScanCaptureStatus(`Errore ri-processo: ${err.message || err}`, 'error');
+    }
 });
 
 

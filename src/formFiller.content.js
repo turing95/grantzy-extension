@@ -391,8 +391,127 @@
         return `fp_${hex1}${hex2}`;
     }
 
-    function scanForm() {
+    // ---- Auto-open closed dropdowns (Material/Ant/native) before scan -----
+    // Italian portals (Smart&Start = Angular Material) render <mat-option> into
+    // a cdk-overlay-container ONLY while the dropdown panel is open. Without
+    // opening, harvestOptionElements returns []. This module-level cache lets
+    // us harvest options pre-scan and inject them at scan time.
+    const __harvestedOptionsCache = new WeakMap(); // element → string[]
+
+    function isClosedDropdownTrigger(el) {
+        if (!el) return false;
+        const tag = el.tagName?.toLowerCase();
+        // Native <select> always exposes options — no need to open it.
+        if (tag === 'select') return false;
+        // Skip disabled / hidden.
+        if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+        if (!isVisible(el)) return false;
+        // Skip if already open.
+        if (el.getAttribute('aria-expanded') === 'true') return false;
+        // Material / generic combobox.
+        const role = (el.getAttribute('role') || '').toLowerCase();
+        if (role === 'combobox') return true;
+        if (tag === 'mat-select') return true;
+        const cls = String(el.className || '');
+        if (cls.includes('mat-select') && !cls.includes('mat-option')) return true;
+        if (cls.includes('ant-select-selector')) return true;
+        return false;
+    }
+
+    function findClosedDropdownTriggers() {
+        const candidates = Array.from(document.querySelectorAll(
+            '[role="combobox"], mat-select, .mat-select-trigger, .ant-select-selector'
+        ));
+        return candidates.filter(isClosedDropdownTrigger);
+    }
+
+    function harvestVisibleOverlayOptions() {
+        const seen = new Set();
+        const out = [];
+        document.querySelectorAll(
+            '.cdk-overlay-container mat-option, .cdk-overlay-container [role="option"], '
+            + '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, '
+            + 'body > [class*="rc-virtual-list"] [role="option"]'
+        ).forEach(node => {
+            const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!text || seen.has(text)) return;
+            seen.add(text);
+            out.push(text);
+        });
+        return out;
+    }
+
+    async function autoOpenAllClosedDropdowns({ maxDropdowns = 30, perDropdownDelayMs = 220 } = {}) {
+        const triggers = findClosedDropdownTriggers().slice(0, maxDropdowns);
+        if (!triggers.length) return { opened: 0, harvested: 0 };
+        let harvestedCount = 0;
+        for (const trigger of triggers) {
+            try {
+                trigger.scrollIntoView({ block: 'center', behavior: 'instant' });
+                trigger.click();
+                await sleep(perDropdownDelayMs);
+                const opts = harvestVisibleOverlayOptions();
+                if (opts.length) {
+                    __harvestedOptionsCache.set(trigger, opts);
+                    harvestedCount++;
+                }
+                // Close: prefer Escape (Material/Ant both honour it).
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                await sleep(80);
+                // If still open (rare), click body to close.
+                if (trigger.getAttribute('aria-expanded') === 'true') {
+                    document.body?.click();
+                    await sleep(60);
+                }
+            } catch (err) {
+                // Move on — one bad widget shouldn't break the whole scan.
+                console.warn('[grantzy] auto-open dropdown failed', err);
+            }
+        }
+        return { opened: triggers.length, harvested: harvestedCount };
+    }
+
+    function getHarvestedOptionsFor(element) {
+        if (!element) return [];
+        // Direct match first.
+        const direct = __harvestedOptionsCache.get(element);
+        if (direct?.length) return direct;
+        // Try the canonical wrapper (mat-select container, ant-select wrapper).
+        const wrapper = element.closest && (
+            element.closest('mat-select')
+            || element.closest('.mat-select-trigger')
+            || element.closest('.ant-select-selector')
+        );
+        if (wrapper) {
+            const wrapped = __harvestedOptionsCache.get(wrapper);
+            if (wrapped?.length) return wrapped;
+        }
+        return [];
+    }
+
+    async function scanForm({ openDropdowns = false } = {}) {
+        let openStats = null;
+        if (openDropdowns) {
+            try {
+                openStats = await autoOpenAllClosedDropdowns();
+            } catch (err) {
+                console.warn('[grantzy] autoOpenAllClosedDropdowns failed', err);
+                openStats = { opened: 0, harvested: 0, error: String(err?.message || err) };
+            }
+        }
         const fields = discoverFields();
+        // Inject harvested options into dom_fields where collectOptions returned [].
+        for (const f of fields) {
+            if (!Array.isArray(f.options) || f.options.length === 0) {
+                // Re-resolve element from DOM via pathHint (best-effort).
+                const el = f.pathHint ? document.querySelector(f.pathHint) : null;
+                const harvested = getHarvestedOptionsFor(el);
+                if (harvested.length) {
+                    f.options = harvested.map(text => ({ text, value: text }));
+                }
+            }
+        }
         return {
             success: true,
             origin: window.location.origin,
@@ -400,6 +519,7 @@
             formFingerprint: buildFingerprint(fields),
             fields,
             ariaSnapshot: buildAriaSnapshotYaml(),
+            autoOpenStats: openStats,
         };
     }
 
@@ -517,10 +637,13 @@
                 .filter(Boolean)
                 .slice(0, 50);
         }
-        return harvestOptionElements(element)
+        const live = harvestOptionElements(element)
             .map(o => o.text)
-            .filter(Boolean)
-            .slice(0, 50);
+            .filter(Boolean);
+        if (live.length) return live.slice(0, 50);
+        // Fall back to options harvested by the auto-open pre-pass (A.2).
+        const harvested = getHarvestedOptionsFor(element);
+        return harvested.slice(0, 50);
     }
 
     function buildAriaSnapshotYaml() {
@@ -972,7 +1095,9 @@
         }
 
         if (message.action === '__grantzy_scan_form') {
-            sendResponse(scanForm());
+            scanForm({ openDropdowns: !!message.openDropdowns })
+                .then(result => sendResponse(result))
+                .catch(error => sendResponse({ success: false, error: error.message || 'scan_failed' }));
             return true;
         }
 

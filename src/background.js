@@ -1095,8 +1095,12 @@ async function handlePlatformScanCapture(message) {
     await ensureTabPermission(tab.url || '', false);
     await executeScript(tab.id, ['src/formFiller.content.js']);
     let scanResponse;
+    const openDropdowns = message.openDropdowns !== false;  // default ON
     try {
-        scanResponse = await sendMessageToTab(tab.id, { action: '__grantzy_scan_form' });
+        scanResponse = await sendMessageToTab(tab.id, {
+            action: '__grantzy_scan_form',
+            openDropdowns,
+        });
     } catch (connectionError) {
         const msg = String(connectionError?.message || '');
         if (msg.includes('Could not establish connection') || msg.includes('Receiving end does not exist')) {
@@ -1162,6 +1166,80 @@ async function handlePlatformScanCommit(message) {
     return { success: true, commit: data };
 }
 
+async function handlePlatformScanDeleteCapture(message) {
+    const scanRunUuid = String(message.scanRunUuid || '').trim();
+    const captureIndex = Number(message.captureIndex);
+    if (!scanRunUuid) throw new Error('scanRunUuid is required');
+    if (!Number.isInteger(captureIndex) || captureIndex < 1) {
+        throw new Error('captureIndex must be a positive integer (1-based)');
+    }
+    const data = await fetchJson(
+        buildApiUrl(`/api/setup/platform-scan/${scanRunUuid}/captures/${captureIndex}/delete/`),
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    );
+    return { success: true, delete: data };
+}
+
+async function handlePlatformScanReprocess(message) {
+    const scanRunUuid = String(message.scanRunUuid || '').trim();
+    if (!scanRunUuid) throw new Error('scanRunUuid is required');
+    const dryRun = message.dryRun !== false;
+    const data = await fetchJson(
+        buildApiUrl(`/api/setup/platform-scan/${scanRunUuid}/reprocess/`),
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: dryRun }),
+        },
+    );
+    return { success: true, reprocess: data };
+}
+
+async function handlePlatformScanList(message) {
+    const url = buildApiUrl('/api/setup/platform-scan/list/', {
+        status: message.status || '',
+        search: message.search || '',
+        limit: message.limit || '',
+    });
+    const data = await fetchJson(url);
+    return { success: true, list: data };
+}
+
+async function handlePlatformScanFillables(message) {
+    const url = buildApiUrl('/api/setup/platform-scan/fillables/', {
+        search: message.search || '',
+        limit: message.limit || '',
+    });
+    const data = await fetchJson(url);
+    return { success: true, fillables: data };
+}
+
+async function handlePlatformScanCreate(message) {
+    const fillableUuid = String(message.fillableUuid || '').trim();
+    if (!fillableUuid) throw new Error('fillableUuid is required');
+    const data = await fetchJson(
+        buildApiUrl('/api/setup/platform-scan/create/'),
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fillable_uuid: fillableUuid }),
+        },
+    );
+    return { success: true, run: data };
+}
+
+async function handlePlatformScanFullState(message) {
+    /* Returns the run + full captures meta + accumulated tree, for the
+       sidepanel "captures list" + "live tree view" UI. */
+    const scanRunUuid = String(message.scanRunUuid || '').trim();
+    if (!scanRunUuid) throw new Error('scanRunUuid is required');
+    const data = await fetchJson(
+        buildApiUrl(`/api/setup/platform-scan/${scanRunUuid}/state/`),
+        { method: 'GET' },
+    );
+    return { success: true, state: data };
+}
+
 const ACTION_HANDLERS = {
     fetchApplications: handleFetchApplications,
     fetchApplicationData: handleFetchApplicationData,
@@ -1199,6 +1277,12 @@ const ACTION_HANDLERS = {
     platformScanCapture: handlePlatformScanCapture,
     platformScanCommit: handlePlatformScanCommit,
     platformScanRestart: handlePlatformScanRestart,
+    platformScanDeleteCapture: handlePlatformScanDeleteCapture,
+    platformScanReprocess: handlePlatformScanReprocess,
+    platformScanFullState: handlePlatformScanFullState,
+    platformScanList: handlePlatformScanList,
+    platformScanFillables: handlePlatformScanFillables,
+    platformScanCreate: handlePlatformScanCreate,
     getActiveTabInfo: handleGetActiveTabInfo,
     downloadFile: async (message) => {
         if (!message.fileUuid) {
