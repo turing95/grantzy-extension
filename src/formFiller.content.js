@@ -222,6 +222,43 @@
         return path.join(' > ');
     }
 
+    function harvestOptionElements(element) {
+        const out = [];
+        const seen = new Set();
+        const push = (node) => {
+            if (!node) return;
+            const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!text || seen.has(text)) return;
+            seen.add(text);
+            out.push({
+                text,
+                value: node.getAttribute && (node.getAttribute('data-value') || node.getAttribute('value')) || text,
+            });
+        };
+
+        const ariaTargets = (element.getAttribute('aria-controls') || '').split(/\s+/)
+            .concat((element.getAttribute('aria-owns') || '').split(/\s+/))
+            .filter(Boolean);
+        ariaTargets.forEach(id => {
+            const target = document.getElementById(id);
+            if (!target) return;
+            target.querySelectorAll('[role="option"], mat-option, .ant-select-item-option, [class*="react-select"][class*="option"]')
+                .forEach(push);
+        });
+
+        // Angular Material / CDK renders <mat-option> into an overlay container only
+        // when its mat-select is open. Only harvest from there if THIS combobox is
+        // expanded — otherwise we'd attribute another field's open dropdown to this
+        // one. Empty result is fine; the prompt has a canonical fallback for known
+        // Italian dropdowns.
+        if (out.length === 0 && element.getAttribute('aria-expanded') === 'true') {
+            document.querySelectorAll('.cdk-overlay-container mat-option, .cdk-overlay-container [role="option"]').forEach(push);
+            document.querySelectorAll('body > [class*="rc-virtual-list"] [role="option"]').forEach(push);
+        }
+
+        return out;
+    }
+
     function collectOptions(element, widgetKind) {
         if (!element) {
             return [];
@@ -234,21 +271,17 @@
             }));
         }
 
-        const role = element.getAttribute('role');
-        if (role === 'combobox') {
-            const listboxId = element.getAttribute('aria-controls');
-            if (listboxId) {
-                const listbox = document.getElementById(listboxId);
-                if (listbox) {
-                    return Array.from(listbox.querySelectorAll('[role="option"]')).map(option => ({
-                        text: option.textContent?.trim() || '',
-                        value: option.getAttribute('data-value') || option.textContent?.trim() || ''
-                    }));
-                }
-            }
+        const inner = element.querySelector('select');
+        if (inner) {
+            return Array.from(inner.options || []).map(option => ({
+                text: option.textContent?.trim() || '',
+                value: option.value ?? ''
+            }));
         }
 
-        return [];
+        const role = element.getAttribute('role');
+        const targetForOptions = role === 'combobox' ? element : (element.querySelector('[role="combobox"]') || element);
+        return harvestOptionElements(targetForOptions);
     }
 
     function getRepresentativeElement(element) {
@@ -477,19 +510,17 @@
                 .filter(Boolean)
                 .slice(0, 50);
         }
-        // For ARIA combobox patterns, look for an associated listbox or
-        // visible options inside the same labelled region.
-        const listboxId = element.getAttribute('aria-controls') || element.getAttribute('aria-owns');
-        if (listboxId) {
-            const lb = document.getElementById(listboxId);
-            if (lb) {
-                return Array.from(lb.querySelectorAll('[role="option"]'))
-                    .map(o => (o.textContent || '').trim())
-                    .filter(Boolean)
-                    .slice(0, 50);
-            }
+        const innerSelect = element.querySelector && element.querySelector('select');
+        if (innerSelect) {
+            return Array.from(innerSelect.options || [])
+                .map(o => (o.textContent || '').trim())
+                .filter(Boolean)
+                .slice(0, 50);
         }
-        return [];
+        return harvestOptionElements(element)
+            .map(o => o.text)
+            .filter(Boolean)
+            .slice(0, 50);
     }
 
     function buildAriaSnapshotYaml() {
