@@ -365,8 +365,188 @@
             origin: window.location.origin,
             url: window.location.href,
             formFingerprint: buildFingerprint(fields),
-            fields
+            fields,
+            ariaSnapshot: buildAriaSnapshotYaml(),
         };
+    }
+
+    // ---------------------------------------------------------------- ARIA
+
+    // Map HTML tag to default ARIA role for elements that matter to a form
+    // mapping pass. Elements not in this map only contribute structurally.
+    const TAG_ROLE_MAP = {
+        button: 'button',
+        select: 'combobox',
+        textarea: 'textbox',
+        a: 'link',
+        form: 'form',
+        fieldset: 'group',
+        legend: 'caption',
+        label: 'label',
+        h1: 'heading',
+        h2: 'heading',
+        h3: 'heading',
+        h4: 'heading',
+        h5: 'heading',
+        h6: 'heading',
+        ul: 'list',
+        ol: 'list',
+        li: 'listitem',
+        nav: 'navigation',
+    };
+
+    function inputRole(element) {
+        const type = (element.getAttribute('type') || 'text').toLowerCase();
+        if (type === 'checkbox') return 'checkbox';
+        if (type === 'radio') return 'radio';
+        if (type === 'submit' || type === 'button' || type === 'reset') return 'button';
+        if (type === 'date' || type === 'datetime-local' || type === 'month') return 'date';
+        if (type === 'number') return 'number';
+        if (type === 'email') return 'textbox';
+        if (type === 'tel') return 'textbox';
+        if (type === 'url') return 'textbox';
+        if (type === 'file') return 'file';
+        return 'textbox';
+    }
+
+    function elementRole(element) {
+        const explicit = (element.getAttribute('role') || '').toLowerCase();
+        if (explicit) return explicit;
+        const tag = element.tagName.toLowerCase();
+        if (tag === 'input') return inputRole(element);
+        return TAG_ROLE_MAP[tag] || '';
+    }
+
+    const SKIP_TAGS = new Set(['script', 'style', 'noscript', 'link', 'meta', 'svg', 'path', 'br', 'hr']);
+
+    // Roles we surface in the YAML (everything else is treated as a generic
+    // container — we skip generics that don't add information).
+    const SURFACED_ROLES = new Set([
+        'form', 'group', 'heading', 'textbox', 'combobox', 'checkbox',
+        'radio', 'date', 'number', 'file', 'button', 'link', 'list',
+        'listitem', 'option', 'navigation',
+    ]);
+
+    function isAriaHidden(element) {
+        if (element.getAttribute('aria-hidden') === 'true') return true;
+        return false;
+    }
+
+    function ariaName(element) {
+        const arial = element.getAttribute('aria-label');
+        if (arial) return arial.trim();
+        const labelled = element.getAttribute('aria-labelledby');
+        if (labelled) {
+            const target = document.getElementById(labelled);
+            if (target?.textContent) return target.textContent.trim().slice(0, 200);
+        }
+        if (element.id) {
+            const lbl = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
+            if (lbl?.textContent) return lbl.textContent.trim().slice(0, 200);
+        }
+        const wrapping = element.closest && element.closest('label');
+        if (wrapping?.textContent) {
+            const txt = wrapping.textContent.trim();
+            if (txt) return txt.slice(0, 200);
+        }
+        const placeholder = element.getAttribute('placeholder');
+        if (placeholder) return placeholder.trim();
+        const tag = element.tagName.toLowerCase();
+        if (tag === 'button' || tag === 'a' || /^h[1-6]$/.test(tag) || tag === 'legend' || tag === 'label') {
+            const txt = (element.textContent || '').trim();
+            if (txt) return txt.slice(0, 200);
+        }
+        return '';
+    }
+
+    function ariaRequired(element) {
+        if (element.required === true) return true;
+        if (element.getAttribute('aria-required') === 'true') return true;
+        // Heuristic: many Italian portals print the asterisk in a sibling span.
+        const labelEl = element.closest && element.closest('label');
+        const labelText = labelEl?.textContent || '';
+        if (labelText.includes('*')) return true;
+        return false;
+    }
+
+    function collectOptionsForCombobox(element) {
+        const tag = element.tagName.toLowerCase();
+        if (tag === 'select') {
+            return Array.from(element.options || [])
+                .map(o => (o.textContent || '').trim())
+                .filter(Boolean)
+                .slice(0, 50);
+        }
+        // For ARIA combobox patterns, look for an associated listbox or
+        // visible options inside the same labelled region.
+        const listboxId = element.getAttribute('aria-controls') || element.getAttribute('aria-owns');
+        if (listboxId) {
+            const lb = document.getElementById(listboxId);
+            if (lb) {
+                return Array.from(lb.querySelectorAll('[role="option"]'))
+                    .map(o => (o.textContent || '').trim())
+                    .filter(Boolean)
+                    .slice(0, 50);
+            }
+        }
+        return [];
+    }
+
+    function buildAriaSnapshotYaml() {
+        const lines = [];
+
+        function walk(element, depth, ancestorRoles) {
+            if (!(element instanceof Element)) return;
+            const tag = element.tagName.toLowerCase();
+            if (SKIP_TAGS.has(tag)) return;
+            if (isAriaHidden(element)) return;
+            if (!isVisible(element)) return;
+
+            const role = elementRole(element);
+            const surfaced = SURFACED_ROLES.has(role);
+            let nextDepth = depth;
+
+            if (surfaced) {
+                const name = ariaName(element);
+                const flags = [];
+                if (ariaRequired(element)) flags.push('required');
+                if (element.disabled || element.getAttribute('aria-disabled') === 'true') flags.push('disabled');
+                const flagStr = flags.length ? ' ' + flags.join(' ') : '';
+                const namePart = name ? ` "${name.replace(/"/g, '\\"')}"` : '';
+
+                // Combobox / select — emit options inline as children.
+                if (role === 'combobox') {
+                    const opts = collectOptionsForCombobox(element);
+                    if (opts.length) {
+                        lines.push(`${'  '.repeat(depth)}- combobox${namePart}${flagStr}:`);
+                        opts.forEach(opt => {
+                            const oname = opt.replace(/"/g, '\\"').slice(0, 80);
+                            lines.push(`${'  '.repeat(depth + 1)}- option "${oname}"`);
+                        });
+                    } else {
+                        lines.push(`${'  '.repeat(depth)}- combobox${namePart}${flagStr}`);
+                    }
+                    return; // Don't recurse into combobox internals.
+                }
+
+                lines.push(`${'  '.repeat(depth)}- ${role}${namePart}${flagStr}`);
+                nextDepth = depth + 1;
+            }
+
+            for (const child of element.children) {
+                walk(child, nextDepth, surfaced ? [...ancestorRoles, role] : ancestorRoles);
+            }
+        }
+
+        walk(document.body, 0, []);
+        // Cap final size: extremely large pages can produce 100KB+ which is
+        // wasteful for the LLM. Truncate with a marker.
+        const yaml = lines.join('\n');
+        const MAX = 40_000;
+        if (yaml.length > MAX) {
+            return yaml.slice(0, MAX) + '\n# ...truncated';
+        }
+        return yaml;
     }
 
     function dispatchValueEvents(element) {

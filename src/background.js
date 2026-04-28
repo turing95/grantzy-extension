@@ -1008,6 +1008,7 @@ async function handlePlatformScanCapture(message) {
         throw new Error(scanResponse?.error || 'Form discovery failed');
     }
     const domFields = Array.isArray(scanResponse.fields) ? scanResponse.fields : [];
+    const ariaSnapshot = typeof scanResponse.ariaSnapshot === 'string' ? scanResponse.ariaSnapshot : '';
 
     // 2. Capture viewport screenshot.
     const screenshotB64 = await captureVisibleTabPng(tab.windowId);
@@ -1023,6 +1024,7 @@ async function handlePlatformScanCapture(message) {
                 page_title: tab.title || '',
                 screenshot_b64: screenshotB64,
                 dom_fields: domFields,
+                aria_snapshot: ariaSnapshot,
                 capture_context: captureContext,
             }),
         }
