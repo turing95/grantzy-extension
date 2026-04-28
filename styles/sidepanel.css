@@ -2150,3 +2150,31 @@ body {
 }
 .scan-picker-paste { font-size: 0.78rem; color: #6b7280; }
 .scan-picker-paste summary { cursor: pointer; padding: 2px 0; }
+
+/* "Page already mapped" badge in the active scan block */
+.scan-tab-mapped-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+.scan-tab-mapped-badge.is-new {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+.scan-tab-mapped-badge.is-mapped {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+.scan-tab-mapped-badge.is-mapped-multi {
+  background: #ffedd5;
+  color: #9a3412;
+  border: 1px solid #fdba74;
+}
+.scan-tab-mapped-icon { font-size: 1rem; }
+.scan-tab-mapped-detail { color: inherit; opacity: 0.85; font-size: 0.78rem; margin-left: auto; }

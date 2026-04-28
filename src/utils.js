@@ -144,3 +144,50 @@ export function debounce(fn, wait = 200) {
     }, wait);
   };
 }
+
+// --- Scan run page-mapping helpers (used by sidepanel.js) -------------------
+
+const _SCAN_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+const _SCAN_LONG_NUMERIC_RE = /\b\d{6,}\b/g;
+
+// Normalize a portal URL so two pages of the same wizard step but with
+// different per-instance UUIDs match each other. Smart&Start example:
+//   .../domanda/EAE9.../compagine-sociale/4474.../tipo-socio/52B7.../persona-fisica
+//   becomes .../domanda/<any>/compagine-sociale/<any>/tipo-socio/<any>/persona-fisica
+// Strips query string + trailing slash. Replaces UUIDs and long numeric IDs
+// with the wildcard token. Falls back to a best-effort string strip on parse error.
+export function normalizeUrlForMatching(rawUrl) {
+  if (!rawUrl) return '';
+  try {
+    const url = new URL(rawUrl);
+    let path = url.pathname.replace(_SCAN_UUID_RE, '*').replace(_SCAN_LONG_NUMERIC_RE, '*');
+    if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+    return `${url.origin}${path}`;
+  } catch (_err) {
+    return String(rawUrl).split('?')[0];
+  }
+}
+
+/**
+ * Return all captures whose URL matches the current URL (after normalization).
+ * Each match keeps its operator_context + ts so the UI can show "where" and
+ * "when". Matches are ordered as they appear in the captures array.
+ */
+export function findMatchingCaptures(currentUrl, captures) {
+  if (!currentUrl) return [];
+  const normalizedCurrent = normalizeUrlForMatching(currentUrl);
+  if (!normalizedCurrent) return [];
+  const out = [];
+  (captures || []).forEach((c, idx) => {
+    const cu = c.url || c.URL || '';
+    if (normalizeUrlForMatching(cu) === normalizedCurrent) {
+      out.push({
+        index: c.index || (idx + 1),
+        url: cu,
+        ts: c.ts || c.timestamp || null,
+        operator_context: c.operator_context || '',
+      });
+    }
+  });
+  return out;
+}

@@ -349,7 +349,11 @@
             const idAttr = element.id || '';
             const placeholder = element.getAttribute('placeholder') || '';
             const inputType = (element.getAttribute('type') || '').toLowerCase();
-            const required = element.required || element.getAttribute('aria-required') === 'true';
+            // Use the unified ariaRequired() so we catch Angular Material's
+            // .mat-form-field-required-marker spans, Ant Design's required
+            // markers, generic external labels with `*`, etc. — not just the
+            // bare HTML `required` attribute (which custom widgets rarely set).
+            const required = ariaRequired(element);
             const pathHint = getCssPath(element);
             const signature = normalize(`${widgetKind}|${label}|${name}|${idAttr}|${placeholder}|${pathHint}`);
 
@@ -613,12 +617,45 @@
     }
 
     function ariaRequired(element) {
+        if (!element) return false;
         if (element.required === true) return true;
         if (element.getAttribute('aria-required') === 'true') return true;
-        // Heuristic: many Italian portals print the asterisk in a sibling span.
+
+        // Italian portals (Smart&Start = Angular Material) put the red `*`
+        // in a styled span (.mat-form-field-required-marker / .mat-mdc-form-field-required-marker)
+        // INSIDE a wrapping form-field component, NOT as part of the label
+        // text and NOT as an aria-required attribute. We must walk up to
+        // the nearest mat-form-field / form-field wrapper to find it.
+        const formField = element.closest && (
+            element.closest('mat-form-field')
+            || element.closest('mat-mdc-form-field')
+            || element.closest('.mat-form-field')
+            || element.closest('.mat-mdc-form-field')
+            || element.closest('.form-field')
+            || element.closest('.form-group')
+            || element.closest('[class*="form-item"]')
+        );
+        if (formField) {
+            const requiredMarker = formField.querySelector(
+                '.mat-form-field-required-marker, .mat-mdc-form-field-required-marker, '
+                + '.required-marker, .field-required, .ant-form-item-required'
+            );
+            if (requiredMarker) return true;
+            // Some forms put a red asterisk as a `*` text node anywhere in
+            // the wrapper; checking textContent for `*` is a last-resort.
+            if ((formField.textContent || '').includes('*')) return true;
+        }
+
+        // Generic label scan (fallback for non-Material portals).
         const labelEl = element.closest && element.closest('label');
-        const labelText = labelEl?.textContent || '';
-        if (labelText.includes('*')) return true;
+        if (labelEl && (labelEl.textContent || '').includes('*')) return true;
+
+        // <label for="id"> external linking — find by id and check its text.
+        if (element.id) {
+            const externalLabel = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
+            if (externalLabel && (externalLabel.textContent || '').includes('*')) return true;
+        }
+
         return false;
     }
 

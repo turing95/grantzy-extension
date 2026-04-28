@@ -22,7 +22,9 @@ import {
     storageSet,
     storageRemove,
     toApiOriginLabel,
-    formatRelativeTime
+    formatRelativeTime,
+    normalizeUrlForMatching,
+    findMatchingCaptures,
 } from './utils.js';
 
 const searchInput = document.getElementById('app-search-input');
@@ -656,12 +658,55 @@ function showScanActiveBlock() {
     scanActiveBlockEl?.removeAttribute('hidden');
 }
 
+const scanTabMappedBadgeEl = document.getElementById('scan-tab-mapped-badge');
+let _lastActiveTabUrl = '';
+
+function renderTabMappedBadge(currentUrl, captures) {
+    if (!scanTabMappedBadgeEl) return;
+    if (!currentUrl) {
+        scanTabMappedBadgeEl.hidden = true;
+        return;
+    }
+    const matches = findMatchingCaptures(currentUrl, captures);
+    scanTabMappedBadgeEl.hidden = false;
+    scanTabMappedBadgeEl.classList.remove('is-new', 'is-mapped', 'is-mapped-multi');
+    if (matches.length === 0) {
+        scanTabMappedBadgeEl.classList.add('is-new');
+        scanTabMappedBadgeEl.innerHTML = (
+            `<span class="scan-tab-mapped-icon">🆕</span>`
+            + `<span>Pagina non ancora mappata</span>`
+        );
+    } else if (matches.length === 1) {
+        scanTabMappedBadgeEl.classList.add('is-mapped');
+        const m = matches[0];
+        const when = m.ts ? fmtRelativeTime(m.ts) : '';
+        const ctx = m.operator_context ? ` · "${m.operator_context.slice(0, 40)}"` : '';
+        scanTabMappedBadgeEl.innerHTML = (
+            `<span class="scan-tab-mapped-icon">✅</span>`
+            + `<span>Già mappata in cattura <strong>#${m.index}</strong>${escapeHtml(ctx)}</span>`
+            + (when ? `<span class="scan-tab-mapped-detail">${escapeHtml(when)}</span>` : '')
+        );
+    } else {
+        scanTabMappedBadgeEl.classList.add('is-mapped-multi');
+        const indices = matches.map(m => `#${m.index}`).join(', ');
+        scanTabMappedBadgeEl.innerHTML = (
+            `<span class="scan-tab-mapped-icon">🔁</span>`
+            + `<span>Già mappata <strong>${matches.length}×</strong>: ${escapeHtml(indices)}</span>`
+        );
+    }
+}
+
 async function refreshActiveTabHint() {
     try {
         const tabInfo = await sendRuntimeMessage({ action: 'getActiveTabInfo' });
-        if (tabInfo?.success && scanActiveTabEl) {
-            scanActiveTabEl.textContent = t('scan_active_tab_url', { url: tabInfo.url || '' });
+        const url = tabInfo?.success ? (tabInfo.url || '') : '';
+        if (scanActiveTabEl) {
+            scanActiveTabEl.textContent = t('scan_active_tab_url', { url });
         }
+        _lastActiveTabUrl = url;
+        // Cross-reference with cached captures from /state/ if we have it.
+        const captures = scanFullStateCache?.captures || [];
+        renderTabMappedBadge(url, captures);
     } catch (_err) {
         // best-effort; ignore
     }
@@ -1349,9 +1394,32 @@ async function refreshScanFullState() {
         if (scanStateWrap) scanStateWrap.hidden = false;
         renderCapturesList(r.state);
         renderTreeView(r.state);
+        // Re-render the "page mapped/new" badge with the fresh captures list.
+        renderTabMappedBadge(_lastActiveTabUrl, r.state?.captures || []);
     } catch (err) {
         console.warn('[grantzy] full state fetch failed', err);
     }
+}
+
+// Re-evaluate the "page mapped" badge whenever the active tab URL changes —
+// SPAs (Angular/React) navigate without full reloads, but Chrome still
+// fires tabs.onUpdated with the new URL once it's reflected in the URL bar.
+if (typeof chrome !== 'undefined' && chrome?.tabs?.onUpdated?.addListener) {
+    chrome.tabs.onUpdated.addListener((_tabId, changeInfo, _tab) => {
+        if (!scanRunUuid) return;
+        if (!changeInfo.url && changeInfo.status !== 'complete') return;
+        // Debounce so SPA route bursts (Angular often fires multiple updates
+        // for one logical navigation) collapse into a single hint refresh.
+        clearTimeout(refreshActiveTabHint._debounce);
+        refreshActiveTabHint._debounce = setTimeout(() => refreshActiveTabHint(), 120);
+    });
+}
+if (typeof chrome !== 'undefined' && chrome?.tabs?.onActivated?.addListener) {
+    chrome.tabs.onActivated.addListener(() => {
+        if (!scanRunUuid) return;
+        clearTimeout(refreshActiveTabHint._debounce);
+        refreshActiveTabHint._debounce = setTimeout(() => refreshActiveTabHint(), 120);
+    });
 }
 
 async function deleteCaptureAtIndex(idx) {
