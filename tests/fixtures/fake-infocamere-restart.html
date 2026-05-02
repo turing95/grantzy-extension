@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<!--
+  Fake Infocamere ReStart-style portal page. Mirrors the Python fixture
+  in `web_app/tests/fixtures/fake_portal_forms.py` so the extension's
+  content script can be exercised against it end-to-end.
+
+  The form is intentionally rich enough to cover the full extractor
+  ontology: autocomplete attrs (Stage A), pattern attrs (format hints),
+  inputmode (soft type signal), aria-describedby (help text), and
+  Italian-specific labels (CF, P.IVA, IBAN, PEC, SDI).
+-->
+<html lang="it">
+<head>
+    <meta charset="utf-8">
+    <title>Fake ReStart Infocamere</title>
+</head>
+<body>
+<form id="domanda">
+    <fieldset id="fs-anagrafica">
+        <legend>Anagrafica impresa</legend>
+
+        <label for="denominazione">Denominazione</label>
+        <input type="text" id="denominazione" name="ragione_sociale">
+
+        <label for="cf">Codice fiscale</label>
+        <input type="text" id="cf" name="cf"
+               placeholder="RSSMRA85T10A562S"
+               pattern="^[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]$"
+               aria-describedby="help-cf">
+        <small id="help-cf">Inserisci il codice fiscale di 16 caratteri.</small>
+
+        <label for="piva">Partita IVA</label>
+        <input type="text" id="piva" name="piva"
+               placeholder="12345678901"
+               inputmode="numeric"
+               pattern="^\d{11}$">
+
+        <label for="forma_giuridica">Forma giuridica</label>
+        <select id="forma_giuridica" name="forma_giuridica">
+            <option value="SRL">S.r.l.</option>
+            <option value="SPA">S.p.A.</option>
+            <option value="DI">Ditta individuale</option>
+        </select>
+
+        <label for="data_cost">Data di costituzione</label>
+        <input type="date" id="data_cost" name="data_costituzione">
+    </fieldset>
+
+    <fieldset id="fs-sede">
+        <legend>Sede legale</legend>
+
+        <label for="indirizzo">Indirizzo (via, piazza)</label>
+        <input type="text" id="indirizzo" name="indirizzo" autocomplete="street-address">
+
+        <label for="civico">Numero civico</label>
+        <input type="text" id="civico" name="civico">
+
+        <label for="cap">CAP</label>
+        <input type="text" id="cap" name="cap" autocomplete="postal-code"
+               inputmode="numeric" pattern="^\d{5}$">
+
+        <label for="comune">Comune</label>
+        <select id="comune" name="comune" autocomplete="address-level2">
+            <option value="MI">Milano</option>
+            <option value="RM">Roma</option>
+            <option value="TO">Torino</option>
+        </select>
+
+        <label for="prov">Provincia</label>
+        <input type="text" id="prov" name="prov">
+
+        <label for="paese">Nazione</label>
+        <select id="paese" name="paese" autocomplete="country-name">
+            <option value="IT">Italia</option>
+            <option value="FR">Francia</option>
+        </select>
+    </fieldset>
+
+    <fieldset id="fs-contatti">
+        <legend>Contatti</legend>
+
+        <label for="email">Email aziendale</label>
+        <input type="email" id="email" name="email" autocomplete="email">
+
+        <label for="pec">PEC</label>
+        <input type="email" id="pec" name="pec" placeholder="impresa@pec.it">
+
+        <label for="telefono">Telefono</label>
+        <input type="tel" id="telefono" name="telefono" autocomplete="tel">
+
+        <label for="sito">Sito web</label>
+        <input type="url" id="sito" name="sito" autocomplete="url">
+    </fieldset>
+
+    <fieldset id="fs-banca">
+        <legend>Coordinate bancarie</legend>
+
+        <label for="iban">IBAN</label>
+        <input type="text" id="iban" name="iban"
+               placeholder="IT60X0542811101000000123456">
+
+        <label for="sdi">Codice destinatario SDI</label>
+        <input type="text" id="sdi" name="sdi" pattern="^[A-Z0-9]{6,7}$">
+    </fieldset>
+
+    <fieldset id="fs-rl">
+        <legend>Rappresentante legale</legend>
+
+        <label for="rl_nome">Nome</label>
+        <input type="text" id="rl_nome" name="rl_nome" autocomplete="given-name">
+
+        <label for="rl_cognome">Cognome</label>
+        <input type="text" id="rl_cognome" name="rl_cognome" autocomplete="family-name">
+
+        <label for="rl_cf">Codice fiscale</label>
+        <input type="text" id="rl_cf" name="rl_cf">
+
+        <label for="rl_bday">Data di nascita</label>
+        <input type="date" id="rl_bday" name="rl_bday" autocomplete="bday">
+    </fieldset>
+
+    <label for="note">Note libere</label>
+    <textarea id="note" name="note"></textarea>
+
+    <!-- Honeypot: must NOT be classified -->
+    <label for="num_pratica_int">Numero pratica interno</label>
+    <input type="text" id="num_pratica_int" name="num_pratica_int">
+</form>
+</body>
+</html>

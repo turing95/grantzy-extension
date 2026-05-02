@@ -117,6 +117,29 @@
         return '';
     }
 
+    function resolveAriaDescribedByText(element) {
+        // Resolve `aria-describedby="id1 id2"` into the concatenated text
+        // of those elements. Help text under inputs lives here on Material,
+        // Ant Design, GOV.UK and many CMS-generated forms — it often
+        // contains semantic gold ("Inserisci il codice fiscale di 16 caratteri").
+        if (!element) {
+            return '';
+        }
+        const refs = element.getAttribute('aria-describedby');
+        if (!refs) {
+            return '';
+        }
+        const parts = [];
+        for (const id of refs.split(/\s+/).filter(Boolean)) {
+            const node = document.getElementById(id);
+            const text = node?.textContent?.trim();
+            if (text) {
+                parts.push(text);
+            }
+        }
+        return parts.join(' ').slice(0, 280);
+    }
+
     function detectWidgetKind(element) {
         const tag = element.tagName.toLowerCase();
         const role = element.getAttribute('role') || '';
@@ -355,6 +378,13 @@
             // bare HTML `required` attribute (which custom widgets rarely set).
             const required = ariaRequired(element);
             const pathHint = getCssPath(element);
+            // Semantic signals consumed by the backend metadata extractor
+            // (Stage A = autocomplete, plus pattern/inputmode/aria-describedby
+            // as direct format/type hints). Cheap to capture, free signal.
+            const autocomplete = element.getAttribute('autocomplete') || '';
+            const pattern = element.getAttribute('pattern') || '';
+            const inputMode = element.getAttribute('inputmode') || '';
+            const ariaDescribedBy = resolveAriaDescribedByText(element);
             const signature = normalize(`${widgetKind}|${label}|${name}|${idAttr}|${placeholder}|${pathHint}`);
 
             return {
@@ -370,7 +400,11 @@
                 visible: true,
                 widgetKind,
                 options: collectOptions(element, widgetKind),
-                pathHint
+                pathHint,
+                autocomplete,
+                pattern,
+                inputMode,
+                ariaDescribedBy
             };
         });
     }
@@ -1123,6 +1157,17 @@
             success: true,
             undone,
             reason: 'undo_completed'
+        };
+    }
+
+    // Expose internals for E2E tests (fake portal HTML + Playwright). No
+    // production caller uses this; the surface is intentionally small and
+    // read-only so tests can exercise field discovery without going
+    // through the chrome.runtime messaging API.
+    if (typeof window !== 'undefined') {
+        window.__grantzyInternals = {
+            discoverFields,
+            buildFingerprint,
         };
     }
 

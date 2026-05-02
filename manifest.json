@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Grantzy form assistant",
-  "version": "2.1.5",
+  "version": "2.2.0",
   "description": "Assistente che ti aiuta a completare form web",
   "side_panel": {
     "default_path": "src/sidepanel.html"
