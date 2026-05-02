@@ -409,38 +409,6 @@ async function preloadSelectedSpace(spaceUuid) {
     }
 }
 
-async function matchFormFieldsWithAiFromApi({
-    applicationId,
-    origin = '',
-    url = '',
-    formFingerprint = '',
-    fields = [],
-    memoryHints = []
-} = {}) {
-    if (!applicationId) {
-        throw new Error('Application id is required for AI field matching.');
-    }
-
-    const payload = {
-        origin: String(origin || ''),
-        url: String(url || ''),
-        form_fingerprint: String(formFingerprint || ''),
-        fields: Array.isArray(fields) ? fields : [],
-        memory_hints: Array.isArray(memoryHints) ? memoryHints : []
-    };
-
-    return fetchJson(
-        buildApiUrl(`/api/extension/v1/spaces/${applicationId}/match-fields`),
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        }
-    );
-}
-
 async function fetchPortalInsertionPlanFromApi({ applicationId, fillableId } = {}) {
     if (!applicationId) {
         throw new Error('applicationId is required for portal insertion plan.');
@@ -451,47 +419,6 @@ async function fetchPortalInsertionPlanFromApi({ applicationId, fillableId } = {
 
     return fetchJson(
         buildApiUrl(`/api/extension/v1/spaces/${applicationId}/portal-insertion-plan/${fillableId}`)
-    );
-}
-
-async function fetchExtensionFormMappingsFromApi({
-    origin = '',
-    formFingerprint = ''
-} = {}) {
-    if (!origin || !formFingerprint) {
-        throw new Error('origin and formFingerprint are required to fetch form mappings.');
-    }
-
-    return fetchJson(
-        buildApiUrl('/api/extension/v1/form-mappings', {
-            origin: String(origin || ''),
-            form_fingerprint: String(formFingerprint || '')
-        })
-    );
-}
-
-async function saveExtensionFormMappingsToApi({
-    origin = '',
-    formFingerprint = '',
-    mappings = []
-} = {}) {
-    if (!origin || !formFingerprint) {
-        throw new Error('origin and formFingerprint are required to save form mappings.');
-    }
-
-    return fetchJson(
-        buildApiUrl('/api/extension/v1/form-mappings'),
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                origin: String(origin || ''),
-                form_fingerprint: String(formFingerprint || ''),
-                mappings: Array.isArray(mappings) ? mappings : []
-            })
-        }
     );
 }
 
@@ -798,27 +725,6 @@ async function handleFetchApplicationData(message) {
     return { success: true, data };
 }
 
-async function handleMatchFormFieldsWithAi(message) {
-    if (!message.applicationId) {
-        throw new Error('applicationId is required');
-    }
-
-    const data = await matchFormFieldsWithAiFromApi({
-        applicationId: message.applicationId,
-        origin: message.origin,
-        url: message.url,
-        formFingerprint: message.formFingerprint,
-        fields: message.fields,
-        memoryHints: message.memoryHints
-    });
-
-    return {
-        success: true,
-        items: Array.isArray(data?.items) ? data.items : [],
-        meta: data?.meta || null
-    };
-}
-
 async function handleFetchPortalInsertionPlan(message) {
     if (!message.applicationId) {
         throw new Error('applicationId is required');
@@ -844,34 +750,6 @@ async function handleFetchPortalInsertionPlan(message) {
             fields: Array.isArray(data?.fields) ? data.fields : [],
             warnings: Array.isArray(data?.warnings) ? data.warnings : []
         }
-    };
-}
-
-async function handleGetExtensionFormMappings(message) {
-    const data = await fetchExtensionFormMappingsFromApi({
-        origin: message.origin,
-        formFingerprint: message.formFingerprint
-    });
-
-    return {
-        success: true,
-        origin: data?.origin || '',
-        formFingerprint: data?.form_fingerprint || '',
-        mappings: Array.isArray(data?.mappings) ? data.mappings : [],
-        meta: data?.meta || null
-    };
-}
-
-async function handleSaveExtensionFormMappings(message) {
-    const data = await saveExtensionFormMappingsToApi({
-        origin: message.origin,
-        formFingerprint: message.formFingerprint,
-        mappings: message.mappings
-    });
-
-    return {
-        success: true,
-        savedCount: Number.parseInt(String(data?.saved_count || '0'), 10) || 0
     };
 }
 
@@ -1284,10 +1162,7 @@ async function handlePlatformScanFullState(message) {
 const ACTION_HANDLERS = {
     fetchApplications: handleFetchApplications,
     fetchApplicationData: handleFetchApplicationData,
-    matchFormFieldsWithAi: handleMatchFormFieldsWithAi,
     fetchPortalInsertionPlan: handleFetchPortalInsertionPlan,
-    getExtensionFormMappings: handleGetExtensionFormMappings,
-    saveExtensionFormMappings: handleSaveExtensionFormMappings,
     getExtensionSession: async message => {
         const session = await fetchExtensionSessionFromApi({ forceSession: Boolean(message.forceSession) });
         return { success: true, session };

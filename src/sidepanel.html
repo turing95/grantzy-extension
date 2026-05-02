@@ -73,8 +73,12 @@
                     <div id="autofill-body" class="collapsible-body">
                         <header class="panel-card-header">
                             <h3>Compilazione automatica</h3>
-                            <p>Seleziona una pratica e compila la pagina con un click.</p>
+                            <p>Seleziona una pratica e il portale, poi compila la pagina con un click.</p>
                         </header>
+                        <div class="autofill-portal-picker">
+                            <label for="portal-fillable-picker">Portale:</label>
+                            <select id="portal-fillable-picker" hidden></select>
+                        </div>
                         <div class="autofill-actions">
                             <button id="apply-fill-btn" type="button" class="magic-fill-btn">Compila</button>
                             <button id="undo-fill-btn" type="button">Annulla</button>

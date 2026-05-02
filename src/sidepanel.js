@@ -7,14 +7,9 @@ import {
     resultsSelection
 } from './searchHandler.js';
 import {
-    buildFillPlan,
     isDropdownField,
     resolveOptionMatch
 } from './fillPlanner.js';
-import {
-    loadMappingMemory,
-    saveMappingMemory
-} from './mappingMemory.js';
 import { t } from './i18n.js';
 import {
     sendRuntimeMessage,
@@ -23,7 +18,6 @@ import {
     storageRemove,
     toApiOriginLabel,
     formatRelativeTime,
-    normalizeUrlForMatching,
     findMatchingCaptures,
 } from './utils.js';
 
@@ -81,6 +75,7 @@ const applyFillButton = document.getElementById('apply-fill-btn');
 const undoFillButton = document.getElementById('undo-fill-btn');
 const autofillStatusEl = document.getElementById('autofill-status');
 const autofillReportEl = document.getElementById('autofill-report');
+const portalFillablePickerEl = document.getElementById('portal-fillable-picker');
 
 const COLLAPSE_STATE_KEY = 'grantzyCollapseSectionsV1';
 const topbarEl = widgetEl.querySelector('.widget-topbar');
@@ -95,10 +90,9 @@ let selectedTreeNodeData = null;
 let selectedApplication = null;
 
 let flatGrantzyFields = [];
-let latestScan = null;
-let currentFillPlan = [];
+let portalFillables = [];
+let selectedPortalFillableUuid = '';
 let isBusy = false;
-let activeFillSession = 0;
 let currentView = 'applications';
 let extensionSettings = null;
 let activeApiOriginLabel = '';
@@ -1483,144 +1477,42 @@ scanReprocessBtn?.addEventListener('click', async () => {
 });
 
 
-function getGrantzyValueByKey(key) {
-    const match = flatGrantzyFields.find(item => item.key === key);
-    return match ? String(match.value ?? '') : '';
-}
-
-function normalizeConfidence(value) {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) {
-        return 0;
-    }
-    return Math.max(0, Math.min(1, parsed));
-}
-
-function normalizeAiStatus(rawStatus, confidence, grantzyKey) {
-    if (!grantzyKey) {
-        return 'skipped';
-    }
-
-    if (rawStatus === 'auto' || rawStatus === 'needs_review' || rawStatus === 'skipped') {
-        return rawStatus;
-    }
-
-    if (confidence >= 0.9) {
-        return 'auto';
-    }
-    if (confidence >= 0.6) {
-        return 'needs_review';
-    }
-    return 'skipped';
-}
-
 function getFieldLabel(field, index) {
     return field?.label || field?.name || field?.idAttr || field?.placeholder || t('field_label_with_index', { index: index + 1 });
 }
 
-function buildMemoryHints(memory = {}) {
-    return Object.entries(memory)
-        .map(([fieldSignature, payload]) => ({
-            field_signature: fieldSignature,
-            grantzy_key: payload?.grantzyKey || ''
-        }))
-        .filter(item => item.field_signature && item.grantzy_key);
-}
-
-function buildFallbackFillPlan(memory = {}) {
-    return buildFillPlan({
-        formFields: latestScan?.fields || [],
-        grantzyFields: flatGrantzyFields,
-        memory
-    }).map(item => ({
-        ...item,
-        enabled: item.status === 'auto' || item.status === 'needs_review' || item.status === 'manual'
-    }));
-}
-
-function buildAiFillPlan(aiItems = [], formFields = []) {
-    const matchByFieldId = new Map();
-    const matchBySignature = new Map();
-
-    aiItems.forEach(item => {
-        if (!item || typeof item !== 'object') {
-            return;
-        }
-        const fieldId = String(item.field_id || item.fieldId || '').trim();
-        const fieldSignature = String(item.field_signature || item.fieldSignature || '').trim();
-        if (fieldId) {
-            matchByFieldId.set(fieldId, item);
-        }
-        if (fieldSignature) {
-            matchBySignature.set(fieldSignature, item);
-        }
-    });
-
-    return formFields.map((field, index) => {
-        const aiItem = matchByFieldId.get(field.fieldId) || matchBySignature.get(field.signature) || null;
-        const rawGrantzyKey = aiItem?.grantzy_key ?? aiItem?.grantzyKey ?? null;
-        const grantzyKey = rawGrantzyKey ? String(rawGrantzyKey) : null;
-        const grantzyKeyExists = grantzyKey
-            ? flatGrantzyFields.some(item => item.key === grantzyKey)
-            : false;
-        const confidence = normalizeConfidence(aiItem?.confidence);
-        let status = normalizeAiStatus(aiItem?.status, confidence, grantzyKeyExists ? grantzyKey : null);
-        let reason = String(aiItem?.reason || (status === 'skipped' ? 'no_match' : 'semantic_label_match'));
-        if (grantzyKey && !grantzyKeyExists) {
-            status = 'skipped';
-            reason = 'invalid_grantzy_key';
-        }
-        const candidateKeysRaw = Array.isArray(aiItem?.candidate_keys)
-            ? aiItem.candidate_keys
-            : (Array.isArray(aiItem?.candidateKeys) ? aiItem.candidateKeys : []);
-        const candidateKeys = Array.from(
-            new Set(
-                candidateKeysRaw
-                    .map(value => String(value || '').trim())
-                    .filter(Boolean)
-            )
-        );
-
-        let grantzyValue = grantzyKeyExists ? getGrantzyValueByKey(grantzyKey) : '';
+function buildPlanItemsFromInsertionPlan(planFields = []) {
+    // Translate the backend insertion plan shape into the items the
+    // formFiller content script (applySingleField) consumes. The backend
+    // already returns the captured field's full shape under
+    // `portal_field` (pathHint, idAttr, name, widgetKind, options, ...)
+    // so the content-script can resolve the DOM element directly.
+    return planFields.map((entry, index) => {
+        const field = entry?.portal_field && typeof entry.portal_field === 'object'
+            ? entry.portal_field
+            : {};
+        const value = entry?.value;
+        const grantzyValue = value === null || value === undefined ? '' : String(value);
         let dropdownOption = null;
-
-        if (grantzyKeyExists && status !== 'skipped' && isDropdownField(field)) {
+        if (grantzyValue && isDropdownField(field)) {
             const optionMatch = resolveOptionMatch(field, grantzyValue);
             dropdownOption = optionMatch.option;
-            if (optionMatch.reason === 'no_options') {
-                status = 'needs_review';
-                reason = 'dropdown_options_not_detected';
-            } else if (!optionMatch.option) {
-                status = 'needs_review';
-                reason = optionMatch.reason || reason;
-            }
         }
-
-        if (status === 'skipped') {
-            grantzyValue = '';
-            dropdownOption = null;
-        }
-
         return {
-            fieldId: field.fieldId,
-            fieldSignature: field.signature,
+            fieldId: String(entry?.portal_row_uuid || `binding_${index + 1}`),
+            fieldSignature: String(entry?.portal_row_uuid || ''),
             field,
             fieldLabel: getFieldLabel(field, index),
-            widgetKind: field.widgetKind,
-            inputType: field.inputType,
-            grantzyKey: status === 'skipped' ? null : (grantzyKeyExists ? grantzyKey : null),
+            widgetKind: field.widgetKind || '',
+            inputType: field.inputType || '',
+            grantzyKey: 'portal_binding',
             grantzyValue,
-            candidates: candidateKeys.map((key, candidateIndex) => ({
-                key,
-                value: getGrantzyValueByKey(key),
-                score: Math.max(0, confidence - (candidateIndex * 0.05)),
-                memoryBoost: 0
-            })),
-            confidence,
-            status,
-            reason,
+            candidates: [],
+            confidence: 1,
+            status: grantzyValue ? 'auto' : 'skipped',
+            reason: grantzyValue ? 'portal_binding' : 'no_value',
             dropdownOption,
-            enabled: status === 'auto' || status === 'needs_review' || status === 'manual'
+            enabled: Boolean(grantzyValue)
         };
     });
 }
@@ -1674,9 +1566,6 @@ function renderFillReport(results = []) {
 }
 
 function resetAutofillState() {
-    latestScan = null;
-    currentFillPlan = [];
-    activeFillSession = 0;
     autofillReportEl.textContent = '';
     autofillReportEl.hidden = true;
     updateActionButtons();
@@ -1690,134 +1579,54 @@ async function refreshFlatGrantzyFields() {
         } else {
             flatGrantzyFields = flattenFields(data.selectedApplicationData.fields);
         }
+        portalFillables = Array.isArray(data.selectedApplicationData.portalFillables)
+            ? data.selectedApplicationData.portalFillables
+            : [];
     } else {
         flatGrantzyFields = [];
+        portalFillables = [];
+    }
+
+    if (!portalFillables.find(item => item.uuid === selectedPortalFillableUuid)) {
+        const firstWithBindings = portalFillables.find(item => item.has_bindings);
+        selectedPortalFillableUuid = firstWithBindings ? firstWithBindings.uuid : (portalFillables[0]?.uuid || '');
     }
 
     updateApplicationsCardHeader(selectedApplication);
+    renderPortalFillablePicker();
     updateActionButtons();
     applyViewVisibility();
 }
 
-async function analyzeCurrentForm({ skipPermissionCheck = false } = {}) {
-    if (!selectedApplication) {
-        setAutofillStatus(t('select_application_first'), 'error');
-        return false;
-    }
-
-    if (!skipPermissionCheck) {
-        const hasPermission = await ensureActiveTabPermission();
-        if (!hasPermission) {
-            return false;
-        }
-    }
-
-    setAutofillStatus(t('analyzing_fields_current_tab'));
-
-    const response = await sendRuntimeMessage({ action: 'scanFormInActiveTab' });
-
-    if (!response.success) {
-        setAutofillStatus(response.error || t('could_not_analyze_form'), 'error');
-        return false;
-    }
-
-    latestScan = {
-        origin: response.origin,
-        formFingerprint: response.formFingerprint,
-        url: response.url,
-        fields: Array.isArray(response.fields) ? response.fields : []
-    };
-
-    if (!latestScan.fields.length) {
-        setAutofillStatus(t('no_fillable_fields_detected'), 'error');
-        currentFillPlan = [];
-        return false;
-    }
-
-    currentFillPlan = [];
-    return true;
-}
-
-async function applyFillPlanToTab({ skipPermissionCheck = false, skipBusyState = false } = {}) {
-    const selectedItems = currentFillPlan.filter(item => item.enabled && item.grantzyKey);
-
-    if (!selectedItems.length) {
-        setAutofillStatus(t('no_fields_matched'), 'error');
+function renderPortalFillablePicker() {
+    if (!portalFillablePickerEl) {
         return;
     }
-
-    if (!skipPermissionCheck) {
-        const hasPermission = await ensureActiveTabPermission();
-        if (!hasPermission) {
-            return;
+    portalFillablePickerEl.innerHTML = '';
+    if (!portalFillables.length) {
+        portalFillablePickerEl.hidden = true;
+        return;
+    }
+    portalFillablePickerEl.hidden = false;
+    portalFillables.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.uuid;
+        const badge = item.has_bindings ? ' ✓' : ' ⚠';
+        option.textContent = `${item.label || item.uuid.slice(0, 8)}${badge}`;
+        if (item.uuid === selectedPortalFillableUuid) {
+            option.selected = true;
         }
-    }
-
-    if (!skipBusyState) {
-        setBusyState(true);
-    }
-    setAutofillStatus(t('applying_fields_count', { count: selectedItems.length }));
-
-    const response = await sendRuntimeMessage({
-        action: 'applyFillPlanInActiveTab',
-        planItems: selectedItems
+        portalFillablePickerEl.appendChild(option);
     });
-
-    if (!skipBusyState) {
-        setBusyState(false);
-    }
-
-    if (!response.success) {
-        setAutofillStatus(response.error || t('failed_to_apply_fill_plan'), 'error');
-        return;
-    }
-
-    const results = Array.isArray(response.results) ? response.results : [];
-    renderFillReport(results);
-
-    const filledIds = new Set(results.filter(result => result.status === 'filled').map(result => result.fieldId));
-    const memoryItems = selectedItems
-        .filter(item => filledIds.has(item.fieldId))
-        .map(item => ({
-            fieldSignature: item.fieldSignature,
-            grantzyKey: item.grantzyKey,
-            dropdownOption: item.dropdownOption
-        }));
-
-    if (memoryItems.length && latestScan?.origin && latestScan?.formFingerprint) {
-        await saveMappingMemory(
-            latestScan.origin,
-            latestScan.formFingerprint,
-            memoryItems,
-            {
-                application: selectedApplication
-                    ? {
-                        uuid: selectedApplication.uuid,
-                        title: selectedApplication.title,
-                        companyName: selectedApplication.companyName
-                    }
-                    : null,
-                formUrl: latestScan.url || null
-            }
-        );
-    }
-
-    const filledCount = results.filter(result => result.status === 'filled').length;
-    const reviewCount = results.filter(result => result.reviewHighlighted).length;
-    const skippedCount = results.length - filledCount;
-    setAutofillStatus(
-        t('autofill_complete_summary', {
-            filledCount,
-            reviewCount,
-            skippedCount
-        }),
-        'success'
-    );
 }
 
-async function fillAllWithConfidenceTiers() {
-    if (!selectedApplication) {
+async function compileFromPortalBindings() {
+    if (!selectedApplication?.uuid) {
         setAutofillStatus(t('select_application_first'), 'error');
+        return;
+    }
+    if (!selectedPortalFillableUuid) {
+        setAutofillStatus(t('portal_fillable_required') || 'Seleziona prima il portale.', 'error');
         return;
     }
 
@@ -1827,109 +1636,52 @@ async function fillAllWithConfidenceTiers() {
     }
 
     setBusyState(true);
+    setAutofillStatus(t('fetching_portal_plan') || 'Recupero binding pre-pianificati…');
 
     try {
-        setAutofillStatus(t('magic_fill_scanning'));
+        const planResponse = await sendRuntimeMessage({
+            action: 'fetchPortalInsertionPlan',
+            applicationId: selectedApplication.uuid,
+            fillableId: selectedPortalFillableUuid
+        });
 
-        if (!flatGrantzyFields.length) {
-            await refreshFlatGrantzyFields();
-        }
-        if (!flatGrantzyFields.length) {
-            setAutofillStatus(t('no_application_data_loaded_select_first'), 'error');
+        if (!planResponse.success) {
+            setAutofillStatus(planResponse.error || (t('could_not_fetch_plan') || 'Errore nel recupero del piano.'), 'error');
             return;
         }
 
-        const analyzed = await analyzeCurrentForm({ skipPermissionCheck: true });
-        if (!analyzed || !latestScan?.fields?.length) {
+        const planItems = buildPlanItemsFromInsertionPlan(planResponse.plan?.fields || []);
+        const enabledItems = planItems.filter(item => item.enabled);
+        if (!enabledItems.length) {
+            setAutofillStatus(t('no_fields_matched') || 'Nessun campo da compilare.', 'error');
             return;
         }
 
-        setAutofillStatus(t('magic_fill_matching'));
+        setAutofillStatus(t('applying_fields_count', { count: enabledItems.length }));
 
-        const fillSessionId = Date.now();
-        activeFillSession = fillSessionId;
+        const fillResponse = await sendRuntimeMessage({
+            action: 'applyFillPlanInActiveTab',
+            planItems: enabledItems
+        });
 
-        const memory = await loadMappingMemory(latestScan.origin, latestScan.formFingerprint);
-        const memoryHints = buildMemoryHints(memory);
-        const hasMemory = memoryHints.length > 0;
-
-        if (hasMemory) {
-            currentFillPlan = buildFallbackFillPlan(memory);
-            const memoryMatchedCount = currentFillPlan.filter(item => item.enabled && item.grantzyKey).length;
-
-            if (memoryMatchedCount > 0) {
-                setAutofillStatus(t('magic_fill_filling'));
-                await applyFillPlanToTab({ skipPermissionCheck: true, skipBusyState: true });
-
-                if (selectedApplication?.uuid) {
-                    const filledSignatures = new Set(
-                        currentFillPlan
-                            .filter(item => item.enabled && item.grantzyKey)
-                            .map(item => item.fieldSignature)
-                    );
-                    const unmatchedFields = latestScan.fields.filter(
-                        field => !filledSignatures.has(field.signature)
-                    );
-
-                    if (unmatchedFields.length > 0) {
-                        const savedSession = fillSessionId;
-                        sendRuntimeMessage({
-                            action: 'matchFormFieldsWithAi',
-                            applicationId: selectedApplication.uuid,
-                            origin: latestScan.origin,
-                            url: latestScan.url,
-                            formFingerprint: latestScan.formFingerprint,
-                            fields: unmatchedFields,
-                            memoryHints
-                        }).then(async (aiResponse) => {
-                            if (activeFillSession !== savedSession) return;
-                            if (aiResponse.success && Array.isArray(aiResponse.items) && aiResponse.items.length) {
-                                const extraPlan = buildAiFillPlan(aiResponse.items, unmatchedFields);
-                                const extraItems = extraPlan.filter(item => item.enabled && item.grantzyKey);
-                                if (extraItems.length > 0) {
-                                    const previousPlan = currentFillPlan;
-                                    currentFillPlan = extraItems;
-                                    await applyFillPlanToTab({ skipPermissionCheck: true });
-                                    currentFillPlan = [...previousPlan, ...extraItems];
-                                }
-                            }
-                        }).catch(() => {});
-                    }
-                }
-
-                return;
-            }
-        }
-
-        if (selectedApplication?.uuid) {
-            const aiResponse = await sendRuntimeMessage({
-                action: 'matchFormFieldsWithAi',
-                applicationId: selectedApplication.uuid,
-                origin: latestScan.origin,
-                url: latestScan.url,
-                formFingerprint: latestScan.formFingerprint,
-                fields: latestScan.fields,
-                memoryHints
-            });
-
-            if (aiResponse.success && Array.isArray(aiResponse.items) && aiResponse.items.length) {
-                currentFillPlan = buildAiFillPlan(aiResponse.items, latestScan.fields);
-            } else {
-                currentFillPlan = buildFallbackFillPlan(memory);
-            }
-        } else {
-            currentFillPlan = buildFallbackFillPlan(memory);
-        }
-
-        if (!currentFillPlan.length || !currentFillPlan.some(item => item.enabled && item.grantzyKey)) {
-            setAutofillStatus(t('no_fields_matched'), 'error');
+        if (!fillResponse.success) {
+            setAutofillStatus(fillResponse.error || (t('failed_to_apply_fill_plan') || 'Compilazione fallita.'), 'error');
             return;
         }
 
-        setAutofillStatus(t('magic_fill_filling'));
-        await applyFillPlanToTab({ skipPermissionCheck: true, skipBusyState: true });
+        const results = Array.isArray(fillResponse.results) ? fillResponse.results : [];
+        renderFillReport(results);
+
+        const filledCount = results.filter(result => result.status === 'filled').length;
+        const skippedCount = results.length - filledCount;
+        const warningCount = Array.isArray(planResponse.plan?.warnings) ? planResponse.plan.warnings.length : 0;
+        setAutofillStatus(
+            t('portal_fill_summary', { filled: filledCount, skipped: skippedCount, warnings: warningCount })
+                || `Compilati ${filledCount}/${results.length}`,
+            'success'
+        );
     } catch (error) {
-        setAutofillStatus(error?.message || t('failed_to_apply_fill_plan'), 'error');
+        setAutofillStatus(error?.message || (t('failed_to_apply_fill_plan') || 'Errore.'), 'error');
     } finally {
         setBusyState(false);
     }
@@ -2348,7 +2100,7 @@ function updateSidebar(nextSelectedApplication) {
 
     updateActionButtons();
     applyViewVisibility();
-    if (!isBusy && !latestScan && !currentFillPlan.length) {
+    if (!isBusy) {
         setAutofillIdleStatus();
     }
 }
@@ -2381,7 +2133,12 @@ function openGrantzySettings() {
     chrome.tabs.create({ url });
 }
 
-applyFillButton.addEventListener('click', fillAllWithConfidenceTiers);
+applyFillButton.addEventListener('click', compileFromPortalBindings);
+if (portalFillablePickerEl) {
+    portalFillablePickerEl.addEventListener('change', event => {
+        selectedPortalFillableUuid = String(event.target?.value || '');
+    });
+}
 undoFillButton.addEventListener('click', undoLastFill);
 
 applicationsViewButton?.addEventListener('click', () => {
@@ -2541,7 +2298,7 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
             searchInput.disabled = false;
             searchInput.value = '';
         }
-        if (!latestScan && !currentFillPlan.length && !isBusy) {
+        if (!isBusy) {
             setAutofillIdleStatus();
         }
     }
@@ -2553,10 +2310,8 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
 
 chrome.runtime.onMessage.addListener((message) => {
     if (message?.action === '__activeTabUrlChanged') {
-        if (latestScan || currentFillPlan.length) {
-            resetAutofillState();
-            setAutofillIdleStatus();
-        }
+        resetAutofillState();
+        setAutofillIdleStatus();
     }
 });
 

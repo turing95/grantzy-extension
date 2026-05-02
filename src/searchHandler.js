@@ -382,6 +382,9 @@ export function setupDataSearch(searchInput, resultsContainer, applicationId, co
             selectedApplicationData: {
                 fields: rawFields,
                 flatFields: flattenedServerFields,
+                portalFillables: Array.isArray(response.data?.portal_fillables)
+                    ? response.data.portal_fillables
+                    : [],
                 updatedAt: response.data?.updated_at || null
             }
         });
