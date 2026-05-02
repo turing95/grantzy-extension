@@ -441,6 +441,19 @@ async function matchFormFieldsWithAiFromApi({
     );
 }
 
+async function fetchPortalInsertionPlanFromApi({ applicationId, fillableId } = {}) {
+    if (!applicationId) {
+        throw new Error('applicationId is required for portal insertion plan.');
+    }
+    if (!fillableId) {
+        throw new Error('fillableId is required for portal insertion plan.');
+    }
+
+    return fetchJson(
+        buildApiUrl(`/api/extension/v1/spaces/${applicationId}/portal-insertion-plan/${fillableId}`)
+    );
+}
+
 async function fetchExtensionFormMappingsFromApi({
     origin = '',
     formFingerprint = ''
@@ -803,6 +816,34 @@ async function handleMatchFormFieldsWithAi(message) {
         success: true,
         items: Array.isArray(data?.items) ? data.items : [],
         meta: data?.meta || null
+    };
+}
+
+async function handleFetchPortalInsertionPlan(message) {
+    if (!message.applicationId) {
+        throw new Error('applicationId is required');
+    }
+    if (!message.fillableId) {
+        throw new Error('fillableId is required');
+    }
+
+    const data = await fetchPortalInsertionPlanFromApi({
+        applicationId: message.applicationId,
+        fillableId: message.fillableId
+    });
+
+    return {
+        success: true,
+        plan: {
+            spaceUuid: String(data?.space_uuid || ''),
+            fillableUuid: String(data?.fillable_uuid || ''),
+            variantUuid: String(data?.variant_uuid || ''),
+            portalUrl: String(data?.portal_url || ''),
+            schemaVersion: Number(data?.schema_version || 0),
+            summaryNote: String(data?.summary_note || ''),
+            fields: Array.isArray(data?.fields) ? data.fields : [],
+            warnings: Array.isArray(data?.warnings) ? data.warnings : []
+        }
     };
 }
 
@@ -1244,6 +1285,7 @@ const ACTION_HANDLERS = {
     fetchApplications: handleFetchApplications,
     fetchApplicationData: handleFetchApplicationData,
     matchFormFieldsWithAi: handleMatchFormFieldsWithAi,
+    fetchPortalInsertionPlan: handleFetchPortalInsertionPlan,
     getExtensionFormMappings: handleGetExtensionFormMappings,
     saveExtensionFormMappings: handleSaveExtensionFormMappings,
     getExtensionSession: async message => {
